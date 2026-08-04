@@ -12,7 +12,7 @@ todas as ferramentas de IA sumirem, a memória continua lá.
 ## Instalar
 
 ```bash
-composer require --dev rechi/memoria-evolutiva
+composer require --dev lastmind-dev/memoria-evolutiva
 vendor/bin/memoria instalar --projeto="meu-app" --codigo=src
 ```
 
@@ -39,7 +39,7 @@ Enquanto o pacote não estiver no Packagist, instale direto do GitHub acrescenta
 
 ```json
 "repositories": [
-    { "type": "vcs", "url": "https://github.com/<seu-usuario>/memoria-evolutiva" }
+    { "type": "vcs", "url": "https://github.com/LastMind-dev/memoria-evolutiva" }
 ]
 ```
 
@@ -65,7 +65,7 @@ faz rede.
 |---|---|---|
 | validadores e gerador | `vendor/` | `composer update` |
 | `padrao.json`, `docs/`, workflow | **seu repositório** | são seus; o pacote nunca os toca depois de publicados |
-| METODO, RAG, exemplos | `vendor/rechi/memoria-evolutiva/` | material de referência; leia de lá, não copie |
+| METODO, RAG, exemplos | `vendor/lastmind-dev/memoria-evolutiva/` | material de referência; leia de lá, não copie |
 
 Essa divisão é o próprio método aplicado a ele mesmo: os scripts têm **um dono** (este
 pacote), e o conteúdo do projeto tem outro (você). Quando o kit era copiado para dentro

@@ -1,5 +1,5 @@
 {
-    "name": "rechi/memoria-evolutiva",
+    "name": "lastmind-dev/memoria-evolutiva",
     "description": "Memória evolutiva para projetos de software: docs/ canônico com frontmatter verificado, cadeia PRD→FDD→HLD→LLD→ADR, cronologia append-only, catraca de dívida e CI que reprova documentação que mente. Funciona com qualquer LLM e sem nenhum.",
     "type": "library",
     "license": "MIT",

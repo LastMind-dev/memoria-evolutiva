@@ -42,14 +42,14 @@ Projeto novo: pode pular direto para o passo 1.
 ## 1. Instale o pacote
 
 ```bash
-composer require --dev rechi/memoria-evolutiva
+composer require --dev lastmind-dev/memoria-evolutiva
 ```
 
 Enquanto não estiver no Packagist, acrescente antes ao `composer.json` do projeto:
 
 ```json
 "repositories": [
-    { "type": "vcs", "url": "https://github.com/<seu-usuario>/memoria-evolutiva" }
+    { "type": "vcs", "url": "https://github.com/LastMind-dev/memoria-evolutiva" }
 ]
 ```
 
@@ -57,7 +57,7 @@ Isso traz os validadores para `vendor/` e o comando `vendor/bin/memoria`. **Nenh
 script é copiado para o seu repositório** — no projeto só vai morar o que é seu.
 
 Os documentos do método (`METODO.md`, `RAG.md`, este arquivo, o exemplo preenchido)
-ficam em `vendor/rechi/memoria-evolutiva/` — leia de lá, não copie.
+ficam em `vendor/lastmind-dev/memoria-evolutiva/` — leia de lá, não copie.
 
 > **Projeto sem Composer?** Baixe o repositório do pacote para qualquer pasta fora do
 > projeto e rode `php <pasta>/scripts/iniciar-estrutura.php` a partir da raiz do
