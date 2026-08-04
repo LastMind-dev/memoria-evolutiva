@@ -1,0 +1,54 @@
+name: Testes do pacote
+
+# O pacote que valida os outros precisa se validar. Este workflow instala o padrão num
+# projeto sintético e confere que a bateria inteira fica verde — inclusive o autoteste,
+# que quebra o projeto de propósito e confere que cada validador reclama.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  fluxo-completo:
+    name: Instalação e verificações num projeto sintético
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Instalar PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          coverage: none
+
+      - name: Montar projeto sintético
+        run: |
+          mkdir -p /tmp/fixture/src/Servicos
+          printf '<?php\nclass S { function f(){ sleep(1); return env("K"); } }\n' > /tmp/fixture/src/Servicos/S.php
+          printf '<?php\nclass R {}\n' > /tmp/fixture/src/Raiz.php
+          cd /tmp/fixture && git init -b main && git add -A
+          git -c user.email=ci@ci -c user.name=ci commit -m fixture
+
+      - name: Instalar o padrão
+        run: cd /tmp/fixture && php $GITHUB_WORKSPACE/scripts/iniciar-estrutura.php --projeto="fixture" --codigo=src
+
+      - name: Gerar derivados e congelar a dívida
+        run: |
+          cd /tmp/fixture
+          php $GITHUB_WORKSPACE/scripts/gerar-docs.php
+          php $GITHUB_WORKSPACE/scripts/validar-catraca.php --medir
+
+      - name: Bateria completa
+        run: |
+          cd /tmp/fixture
+          php $GITHUB_WORKSPACE/scripts/validar-docs.php
+          php $GITHUB_WORKSPACE/scripts/validar-catraca.php
+          php $GITHUB_WORKSPACE/scripts/validar-indice.php
+          php $GITHUB_WORKSPACE/scripts/autoteste.php
+
+      - name: A árvore continua limpa depois de validar
+        run: |
+          cd /tmp/fixture && git add -A
+          git diff --cached --stat -- . ':!docs' ':!padrao.json' ':!.github' ':!AGENTS.md' ':!CLAUDE.md' ':!.cursor' ':!.windsurfrules'

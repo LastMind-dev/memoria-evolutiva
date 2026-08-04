@@ -3,6 +3,12 @@
 Este é o caminho prático. O **porquê** de cada peça está no `METODO.md`; leia depois,
 ou quando alguma decisão da Parte IV parecer arbitrária.
 
+> **O caminho recomendado é via Composer** — os validadores ficam no `vendor/`, com um
+> dono só, e `composer update` corrige todos os seus projetos de uma vez. Quando o kit
+> era copiado para dentro de cada projeto, cada cópia dos scripts era uma bifurcação
+> esperando acontecer: bug corrigido no kit não chegava a projeto nenhum. É o próprio
+> método aplicado a ele mesmo — um fato, um dono.
+
 ---
 
 ## O que este kit é
@@ -12,8 +18,8 @@ manter a história do projeto de forma que qualquer modelo de linguagem — hoje
 a dois anos, em qualquer ferramenta — consiga abrir o repositório e saber onde o
 projeto está sem que ninguém precise explicar.
 
-Não depende de nenhum fornecedor. São arquivos markdown no seu repositório, mais sete
-scripts PHP sem dependência externa. Se todas as ferramentas de IA que você usa hoje
+Não depende de nenhum fornecedor. São arquivos markdown no seu repositório, mais um pacote
+Composer de validadores sem dependência externa. Se todas as ferramentas de IA que você usa hoje
 desaparecerem, a memória continua lá.
 
 ---
@@ -33,45 +39,56 @@ Projeto novo: pode pular direto para o passo 1.
 
 ---
 
-## 1. Copie o kit para a raiz do projeto
-
-```
-padrao.json                 configuração — o ÚNICO arquivo que você edita
-scripts/                    os quatro verificadores, o autoteste, o instalador
-                              e o gerador da peça de procedimento
-docs/                       a árvore, os quatro arquivos de entrada e os moldes
-                              de PRD, FDD, HLD, LLD, ADR, runbook, política, evidência
-.github/workflows/          o CI
-AGENTS.md  CLAUDE.md        ponteiros para docs/PROJETO.md
-.cursor/rules/  .windsurfrules
-```
-
-Não copie `METODO.md`, `RAG.md`, `RAG-HINDSIGHT.md`, `EXEMPLO-PROJETO-PREENCHIDO.md` nem
-este arquivo para dentro do projeto — eles são sobre o método, não sobre o seu projeto.
-Guarde-os onde você guarda referência.
-
-Se o projeto já tem um `CLAUDE.md` ou `AGENTS.md` com conteúdo, **não sobrescreva**:
-o que estiver lá dentro é fato de projeto, e o lugar dele é `docs/PROJETO.md`. Mova, e
-só então deixe o ponteiro.
-
-## 2. Rode o instalador
+## 1. Instale o pacote
 
 ```bash
-php scripts/iniciar-estrutura.php --projeto="meu-app" --codigo=src
+composer require --dev rechi/memoria-evolutiva
 ```
+
+Enquanto não estiver no Packagist, acrescente antes ao `composer.json` do projeto:
+
+```json
+"repositories": [
+    { "type": "vcs", "url": "https://github.com/<seu-usuario>/memoria-evolutiva" }
+]
+```
+
+Isso traz os validadores para `vendor/` e o comando `vendor/bin/memoria`. **Nenhum
+script é copiado para o seu repositório** — no projeto só vai morar o que é seu.
+
+Os documentos do método (`METODO.md`, `RAG.md`, este arquivo, o exemplo preenchido)
+ficam em `vendor/rechi/memoria-evolutiva/` — leia de lá, não copie.
+
+> **Projeto sem Composer?** Baixe o repositório do pacote para qualquer pasta fora do
+> projeto e rode `php <pasta>/scripts/iniciar-estrutura.php` a partir da raiz do
+> projeto. Tudo funciona igual; só os comandos ficam mais longos, e o workflow de CI
+> publicado assume Composer — ajuste-o.
+
+Se o projeto já tem um `CLAUDE.md` ou `AGENTS.md` com conteúdo, atenção no passo
+seguinte: o instalador nunca sobrescreve nada, mas o conteúdo que estiver lá é fato de
+projeto e o lugar dele é `docs/PROJETO.md`. **Mover é trabalho seu** — mova, e só então
+deixe o ponteiro.
+
+## 2. Rode o instalador — na raiz do projeto
+
+```bash
+vendor/bin/memoria instalar --projeto="meu-app" --codigo=src
+```
+
+Ele publica no projeto o que é do projeto: a árvore `docs/` com os quatro arquivos de
+entrada e os moldes de PRD/FDD/HLD/LLD/ADR, o `padrao.json` comentado, os ponteiros de
+raiz (`CLAUDE.md`, `AGENTS.md`, `.cursor/`, `.windsurfrules`) e o workflow de CI.
 
 `--codigo` é a pasta que o gerador varre (`src`, `app`, `lib`, `packages`...).
 Acrescente `--indice` se o projeto usa RAG ou índice semântico.
 
-Ele cria a árvore que faltar, troca `<NOME-DO-PROJETO>` pelo nome real nos modelos, e
-transforma `docs/cronologia/AAAA-MM.md` no mês corrente.
-
-Sobre o `padrao.json`: ele **vem no kit**, com o nome de exemplo dentro. O instalador
-preenche o nome real **só se o valor ainda for o do exemplo** — decisão sua ele nunca
-sobrescreve. Ele diz na saída o que preencheu. Rodar de novo não estraga nada.
+Ele troca `<NOME-DO-PROJETO>` pelo nome real nos modelos e transforma
+`docs/cronologia/AAAA-MM.md` no mês corrente. O `padrao.json` publicado vem com o nome
+de exemplo; o instalador preenche o real **só se o valor ainda for o do exemplo** —
+decisão sua ele nunca sobrescreve. Rodar de novo não estraga nada.
 
 > Se o `padrao.json` ficasse com o nome de exemplo, todo documento gerado sairia
-> carimbado errado **com o build verde**. Por isso o `validar-docs.php` compara o
+> carimbado errado **com o build verde**. Por isso o `memoria validar` compara o
 > `projeto:` de cada documento com o do `padrao.json` — confira na saída do instalador
 > que o nome que apareceu é o seu.
 
@@ -146,10 +163,10 @@ que é gerado e o núcleo do índice. Elas moram neste arquivo, não no `PROJETO
 ## 5. Gere, meça, verifique
 
 ```bash
-php scripts/gerar-docs.php                  # extrai do código o que não se escreve à mão
-php scripts/validar-catraca.php --medir     # congela a dívida atual como linha de base
-php scripts/validar-docs.php                # precisa passar
-php scripts/autoteste.php                   # os validadores pegam mesmo o que prometem?
+vendor/bin/memoria gerar                  # extrai do código o que não se escreve à mão
+vendor/bin/memoria catraca --medir     # congela a dívida atual como linha de base
+vendor/bin/memoria validar                # precisa passar
+vendor/bin/memoria autoteste                   # os validadores pegam mesmo o que prometem?
 ```
 
 **Olhe a saída do gerador pelo menos uma vez.** A verificação de derivado confere se a
@@ -157,7 +174,7 @@ saída é *reprodutível*, não se ela é *verdadeira* — um extrator com bug p
 resultado errado toda vez e passa. Abra `docs/gerado/` e confira se os números batem com
 o que você sabe do seu projeto.
 
-O `autoteste.php` quebra uma **cópia temporária** do projeto de propósito, uma coisa por
+O `memoria autoteste` quebra uma **cópia temporária** do projeto de propósito, uma coisa por
 vez, e confere que o validador certo reclama. Nada é alterado no seu repositório. É o
 teste do alarme de incêndio: apertar o botão. Rode-o de novo sempre que mexer no
 `padrao.json`.
@@ -176,7 +193,7 @@ Preencha `docs/runbooks/indexacao.md` com o procedimento deste projeto, indexe o
 listado em `padrao.json` → `memoria.nucleo`, e **só então**:
 
 ```bash
-php scripts/validar-indice.php --marcar
+vendor/bin/memoria indice --marcar
 ```
 
 Marcar sem indexar de verdade transforma a verificação em teatro.
@@ -236,17 +253,17 @@ Comece cada sessão pelo `PROJETO.md`, feche cada sessão pelo runbook, e deixe 
 
 ---
 
-## Os sete scripts
+## Os comandos
 
 | Script | O que faz | Falha quando |
 |---|---|---|
-| `iniciar-estrutura.php` | instala | — |
-| `gerar-docs.php` | extrai do código o que não deve ser escrito à mão | extrator declarado não existe |
-| `validar-docs.php` | frontmatter, vocabulário, ids, **âncoras**, derivados, ponteiros | âncora aponta para arquivo inexistente; derivado editado à mão ou desatualizado; ponteiro virou fonte paralela |
-| `validar-catraca.php` | mede a dívida congelada | algum contador aumentou |
-| `validar-indice.php` | o índice semântico está em dia com os documentos | documento do núcleo mudou desde a última indexação |
-| `autoteste.php` | quebra uma cópia de propósito e confere que os validadores reclamam | algum validador parou de pegar o que promete |
-| `gerar-skill.php` | monta a peça de procedimento (skill/comando) a partir do runbook | — (`--conferir` avisa quando a peça ficou para trás) |
+| `memoria instalar` | instala | — |
+| `memoria gerar` | extrai do código o que não deve ser escrito à mão | extrator declarado não existe |
+| `memoria validar` | frontmatter, vocabulário, ids, **âncoras**, derivados, ponteiros | âncora aponta para arquivo inexistente; derivado editado à mão ou desatualizado; ponteiro virou fonte paralela |
+| `memoria catraca` | mede a dívida congelada | algum contador aumentou |
+| `memoria indice` | o índice semântico está em dia com os documentos | documento do núcleo mudou desde a última indexação |
+| `memoria autoteste` | quebra uma cópia de propósito e confere que os validadores reclamam | algum validador parou de pegar o que promete |
+| `memoria skill` | monta a peça de procedimento (skill/comando) a partir do runbook | — (`--conferir` avisa quando a peça ficou para trás) |
 
 Nenhum sobe framework, toca banco ou faz rede. Rodam em Linux, macOS e Windows.
 
