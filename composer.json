@@ -1,0 +1,17 @@
+{
+    "name": "rechi/memoria-evolutiva",
+    "description": "Memória evolutiva para projetos de software: docs/ canônico com frontmatter verificado, cadeia PRD→FDD→HLD→LLD→ADR, cronologia append-only, catraca de dívida e CI que reprova documentação que mente. Funciona com qualquer LLM e sem nenhum.",
+    "type": "library",
+    "license": "MIT",
+    "keywords": ["documentation", "adr", "prd", "docs-as-code", "llm", "memoria-evolutiva"],
+    "authors": [
+        { "name": "Alexander Rechi", "email": "alexander.rechi@gmail.com" }
+    ],
+    "require": {
+        "php": ">=8.1"
+    },
+    "bin": ["bin/memoria"],
+    "config": {
+        "sort-packages": true
+    }
+}

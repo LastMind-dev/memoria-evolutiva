@@ -1,0 +1,73 @@
+name: Documentação
+
+# Impede que a documentação canônica volte a mentir.
+#
+# Os validadores vêm do pacote `memoria-evolutiva`, instalado via Composer — o
+# `composer install` abaixo é o que os traz. Quatro verificações, com severidades
+# DELIBERADAMENTE diferentes:
+#
+#   memoria validar     FALHA DURA para documento que tem frontmatter. Âncora quebrada,
+#                       vocabulário inválido, id duplicado, cadeia rompida ou derivado
+#                       editado à mão quebram o build no commit que causou.
+#
+#   memoria catraca     CATRACA. Mede a dívida existente e falha só se aumentar.
+#                       Quando a regra nasce depois do código, reprovar tudo trava o
+#                       time sem consertar nada — e build que nasce vermelho ninguém olha.
+#
+#   memoria indice      O índice semântico costuma ser alcançado por ferramenta que
+#                       roda na máquina de quem trabalha, não aqui. Este passo NÃO
+#                       reindexa: torna visível que precisa.
+#
+#   memoria autoteste   Quebra uma cópia do projeto de propósito e confere que cada
+#                       validador reclama do que promete. Verificador que não reprova
+#                       nada é indistinguível de verificador quebrado.
+#
+# Nenhum sobe framework, toca banco ou faz rede.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  documentacao:
+    name: Integridade da documentação
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # a verificação compara verificado_commit com o HEAD; precisa do histórico
+          fetch-depth: 0
+
+      - name: Instalar PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          coverage: none
+          tools: composer
+
+      - name: Instalar dependências (traz os validadores)
+        run: composer install --no-interaction --prefer-dist --no-progress
+
+      - name: Estrutura, âncoras, cadeia e derivados
+        run: vendor/bin/memoria validar
+
+      - name: Catraca da dívida
+        run: vendor/bin/memoria catraca
+
+      - name: Índice em dia
+        run: vendor/bin/memoria indice
+
+      - name: Os validadores ainda pegam o que prometem
+        run: vendor/bin/memoria autoteste
+
+      - name: O que fazer quando falha
+        if: failure()
+        run: |
+          echo "::notice::Derivado divergente → rode 'vendor/bin/memoria gerar' e commite a saída."
+          echo "::notice::Catraca → código novo introduziu violação. Ver docs/politicas/."
+          echo "::notice::Índice → reindexe os documentos listados e rode 'vendor/bin/memoria indice --marcar'."
+          echo "::notice::Âncora quebrada → o documento cita arquivo que não existe. O código ganha."
+          echo "::notice::Cadeia → deriva_de aponta para documento inexistente, invertido ou superado."

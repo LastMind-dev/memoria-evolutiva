@@ -1,0 +1,61 @@
+#!/usr/bin/env php
+<?php
+/**
+ * memoria — a porta de entrada única dos validadores da memória evolutiva.
+ *
+ * Instalado via Composer, este arquivo aparece em vendor/bin/memoria. Ele não contém
+ * lógica nenhuma: só traduz o subcomando para o script correspondente e repassa os
+ * argumentos. A lógica mora em scripts/, onde pode ser lida — e é onde os comentários
+ * contam qual bug de produção gerou cada regra.
+ */
+
+$mapa = [
+    'instalar'  => 'iniciar-estrutura.php',
+    'gerar'     => 'gerar-docs.php',
+    'validar'   => 'validar-docs.php',
+    'catraca'   => 'validar-catraca.php',
+    'indice'    => 'validar-indice.php',
+    'autoteste' => 'autoteste.php',
+    'skill'     => 'gerar-skill.php',
+];
+
+$cmd  = $argv[1] ?? null;
+$args = array_slice($argv, 2);
+
+/*
+ * `verificar` roda a bateria inteira, na ordem, e devolve o pior código de saída.
+ * É o comando de fim de sessão e o de CI local — um nome só para lembrar.
+ */
+if ($cmd === 'verificar') {
+    $pior = 0;
+    foreach (['validar', 'catraca', 'indice'] as $sub) {
+        passthru(PHP_BINARY . ' ' . escapeshellarg(__DIR__ . '/../scripts/' . $mapa[$sub]), $rc);
+        if ($rc > $pior) {
+            $pior = $rc;
+        }
+    }
+    exit($pior);
+}
+
+if ($cmd === null || !isset($mapa[$cmd])) {
+    fwrite(STDERR, "memoria — memória evolutiva do projeto\n\n");
+    fwrite(STDERR, "Uso: vendor/bin/memoria <comando> [opções]\n\n");
+    fwrite(STDERR, "  instalar   --projeto=NOME --codigo=PASTA [--indice]   instala a estrutura no projeto\n");
+    fwrite(STDERR, "  gerar      extrai do código o que não se escreve à mão\n");
+    fwrite(STDERR, "  validar    estrutura, âncoras, cadeia, derivados, ponteiros\n");
+    fwrite(STDERR, "  catraca    [--medir]   a dívida congelada não pode crescer\n");
+    fwrite(STDERR, "  indice     [--marcar]  o índice semântico está em dia?\n");
+    fwrite(STDERR, "  verificar  validar + catraca + indice, devolvendo o pior resultado\n");
+    fwrite(STDERR, "  autoteste  quebra uma cópia de propósito e confere que os validadores reclamam\n");
+    fwrite(STDERR, "  skill      [--conferir]  gera a peça de procedimento a partir do runbook\n\n");
+    fwrite(STDERR, "Rode sempre a partir da raiz do projeto (onde está o padrao.json).\n");
+    exit($cmd === null ? 0 : 2);
+}
+
+$script = __DIR__ . '/../scripts/' . $mapa[$cmd];
+$linha  = PHP_BINARY . ' ' . escapeshellarg($script);
+foreach ($args as $a) {
+    $linha .= ' ' . escapeshellarg($a);
+}
+passthru($linha, $rc);
+exit($rc);
