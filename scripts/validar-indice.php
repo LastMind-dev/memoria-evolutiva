@@ -38,6 +38,9 @@ if (empty($m['ativo'])) {
     exit(0);
 }
 
+$ferramenta = (string) ($m['ferramenta'] ?? '');
+$rotuloIdx  = $ferramenta !== '' ? "Índice ({$ferramenta})" : 'Índice';
+
 $marcar   = in_array('--marcar', $argv, true);
 $marcador = raiz() . '/' . trim($m['marcador'] ?? 'docs/.indexado.json', '/');
 $nucleoDef = $m['nucleo'] ?? [];
@@ -114,7 +117,7 @@ foreach ($ref as $rel => $_) {
     }
 }
 
-titulo("Índice — última indexação em {$quando}, commit {$ondeSha}");
+titulo("{$rotuloIdx} — última indexação em {$quando}, commit {$ondeSha}");
 printf("  núcleo: %d documentos · indexados: %d\n", count($nucleo), count($ref));
 printf("  fora do núcleo, não indexados: %d (medido, não bloqueia)\n", count($resto));
 

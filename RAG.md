@@ -5,7 +5,11 @@ projeto** — o que vai para o projeto é o `docs/runbooks/indexacao.md`, que o 
 pronto para preencher.
 
 Vale para qualquer ferramenta: Hindsight, pgvector, Qdrant, Weaviate, Chroma, ou o que
-vier depois. Há um anexo com a tradução para o Hindsight em `RAG-HINDSIGHT.md`.
+vier depois. **A escolha é declarada em `padrao.json` → `memoria.ferramenta`** — os
+validadores nunca falam com a ferramenta, então trocar é trocar o campo, o anexo e o
+runbook, nada mais. Há um anexo com a tradução para o Hindsight em `RAG-HINDSIGHT.md`;
+para outra ferramenta, escreva o anexo equivalente e jogue fora o que não usar — anexo
+é descartável por desenho.
 
 ---
 

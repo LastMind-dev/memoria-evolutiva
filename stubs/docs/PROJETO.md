@@ -51,7 +51,8 @@ vive no `ESTADO.md` e no histórico do versionador.
 |---|---|---|
 | **`docs/` neste repositório** | todo fato sobre o código | **canônica** |
 | <acervo secundário, se houver> | <assunto exclusivo> | canônica **só fora do código** |
-| <índice semântico, se houver> | busca por significado | **zero. sempre derivado** |
+| <índice semântico, se houver — ver `padrao.json` → `memoria.ferramenta`> | busca por significado nos documentos | **zero. sempre derivado** |
+| <grafo de código, se houver — ver `padrao.json` → `grafo.ferramenta`> | estrutura do código: quem chama o quê, impacto de mudança | **zero. sempre derivado do código** |
 
 ### Ordem de desempate quando as fontes divergirem
 
@@ -68,6 +69,8 @@ vive no `ESTADO.md` e no histórico do versionador.
 
 - **Resultado de busca semântica nunca é resposta final.** É ponteiro: suba até a fonte
   canônica pela origem declarada, e responda de lá.
+- **O grafo de código, se houver, responde "como funciona", nunca "por quê".** Ele mapeia
+  o que o código É — inclusive quando o código está errado. O porquê mora em `docs/`.
 - **Divergência entre dois níveis não é resolvida por você.** Registre em `docs/ABERTO.md`
   e pare. Você reporta, não escolhe.
 

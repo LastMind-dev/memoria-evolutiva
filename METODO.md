@@ -235,6 +235,8 @@ L5  índice semântico            busca. derivado. reconstruível. zero autorida
 
 **L4 e L5 são opcionais.** Um projeto pequeno vive muito bem com L0 a L3, e a portabilidade entre LLMs — que é o objetivo principal — está inteira em L2 e L3.
 
+**Há um segundo índice opcional, irmão do L5: o grafo de código** (code-review-graph, Graphify e similares). O L5 busca por *significado* nos documentos; o grafo responde *estrutura* no código — quem chama o quê, o que quebra se mexer aqui. Perguntas diferentes, mesma regra: **derivado, reconstruível, autoridade zero.** O grafo descreve o que o código É com fidelidade perfeita — inclusive quando o código está errado; é o FDD que permite perceber isso. Declare-o em `padrao.json` → `grafo` e na tabela de jurisdição, e o método não precisa verificá-lo: essas ferramentas se reindexam sozinhas.
+
 **Onde ficam os quatro arquivos de entrada nesse esquema:** `PROJETO.md` e `ABERTO.md` são L2 (fatos estáveis — as regras do projeto e a lista de conflitos abertos mudam devagar). `cronologia/` é L3, por definição. `ESTADO.md` é o único fora da escala: ele é **um recorte do L3**, o topo da cronologia reescrito em prosa curta para leitura imediata. Por isso é o único documento que pode ser jogado fora e reconstruído a partir da cronologia — e por isso ele é reescrito em vez de acumulado. As regras de frontmatter valem para os quatro, sem exceção.
 
 ### Os quatro arquivos de entrada

@@ -102,6 +102,8 @@
     "memoria": {
         "_leia": "Índice semântico. Deixe `ativo` como false se o projeto não tem RAG — o resto do padrão funciona sem. O núcleo falha duro; o que está fora é medido e não bloqueia.",
         "ativo": false,
+        "_leia_ferramenta": "Qual ferramenta serve este índice: \"hindsight\", \"pgvector\", \"qdrant\", ou o que você usar. Os validadores NUNCA falam com a ferramenta — só comparam o marcador com os documentos — então trocar de ferramenta não muda validador nenhum: muda este campo, o anexo que você segue (RAG-<FERRAMENTA>.md) e o procedimento em docs/runbooks/indexacao.md. É o que torna a troca barata.",
+        "ferramenta": null,
         "marcador": "docs/.indexado.json",
         "nucleo": [
             "docs/PROJETO.md",
@@ -122,6 +124,12 @@
             "docs/_arquivo/",
             "docs/_templates/"
         ]
+    },
+    "grafo": {
+        "_leia": "Grafo de código: code-review-graph, Graphify ou similar. Responde ESTRUTURA — quem chama o quê, impacto de mudança — enquanto o índice semântico responde SIGNIFICADO nos documentos. São perguntas diferentes; use um, os dois ou nenhum. Autoridade zero, sempre derivado do código, reconstruível com um comando. O método não o verifica: essas ferramentas se atualizam sozinhas ou têm o próprio watch. Declarar aqui serve para o agente saber que existe e usá-lo em vez de reler o repositório.",
+        "ativo": false,
+        "ferramenta": null,
+        "comando_de_build": null
     },
     "_exemplos_de_contador": [
         {

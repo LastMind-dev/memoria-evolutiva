@@ -48,7 +48,19 @@ foreach ($argv as $a) {
 
 $projeto = $args['projeto'] ?? null;
 $codigo  = $args['codigo'] ?? 'src';
-$indice  = isset($args['indice']);
+
+/*
+ * --indice aceita valor: `--indice=hindsight` declara a ferramenta junto.
+ * `--indice` sozinho liga o índice sem declarar qual — vale, mas o runbook fica
+ * com o campo em branco para você preencher.
+ *
+ * --grafo=code-review-graph declara a camada de grafo de código, se houver.
+ */
+$indiceOpt  = $args['indice'] ?? null;
+$indice     = $indiceOpt !== null;
+$ferramenta = is_string($indiceOpt) && $indiceOpt !== '' ? strtolower($indiceOpt) : null;
+$grafoOpt   = $args['grafo'] ?? null;
+$grafo      = is_string($grafoOpt) && $grafoOpt !== '' ? strtolower($grafoOpt) : null;
 
 if (!$projeto) {
     echo "Faltou --projeto.\n\n";
@@ -107,6 +119,17 @@ function publicar(string $de, string $para, array &$criados, array &$existiam): 
 }
 
 publicar(pacote() . '/stubs', $raiz, $criados, $existiam);
+
+/*
+ * Se a ferramenta foi declarada, o runbook de indexação já nasce dizendo qual é —
+ * um placeholder a menos para alguém esquecer de trocar.
+ */
+$runIdx = $raiz . '/docs/runbooks/indexacao.md';
+if ($ferramenta !== null && is_file($runIdx)) {
+    $texto = (string) file_get_contents($runIdx);
+    $texto = str_replace('<qual — Hindsight, pgvector, Qdrant...>', $ferramenta, $texto);
+    file_put_contents($runIdx, $texto);
+}
 
 // ------------------------------------------------------------------- árvore
 /*
@@ -184,14 +207,20 @@ $config = [
         ]],
     ],
     'memoria'  => [
-        'ativo'    => $indice,
-        'marcador' => 'docs/.indexado.json',
+        'ativo'      => $indice,
+        'ferramenta' => $ferramenta,
+        'marcador'   => 'docs/.indexado.json',
         'nucleo'   => ['docs/PROJETO.md', 'docs/ESTADO.md', 'docs/ABERTO.md',
                        'docs/GLOSSARIO.md', 'docs/cronologia/', 'docs/produto/',
                        'docs/funcional/', 'docs/arquitetura/', 'docs/decisoes/',
                        'docs/politicas/', 'docs/runbooks/', 'docs/evidencia/',
                        'docs/gerado/'],
         'ignorar'  => ['docs/_arquivo/', 'docs/_templates/'],
+    ],
+    'grafo' => [
+        'ativo'      => $grafo !== null,
+        'ferramenta' => $grafo,
+        'comando_de_build' => null,
     ],
 ];
 
@@ -244,6 +273,16 @@ if (!is_file($arqConfig)) {
     if ($indice && empty($atual['memoria']['ativo'])) {
         $atual['memoria']['ativo'] = true;
         $ajustados[] = 'memoria.ativo → true';
+    }
+
+    if ($ferramenta !== null && empty($atual['memoria']['ferramenta'])) {
+        $atual['memoria']['ferramenta'] = $ferramenta;
+        $ajustados[] = "memoria.ferramenta → {$ferramenta}";
+    }
+
+    if ($grafo !== null && empty($atual['grafo']['ativo'])) {
+        $atual['grafo'] = ['ativo' => true, 'ferramenta' => $grafo, 'comando_de_build' => null];
+        $ajustados[] = "grafo.ferramenta → {$grafo}";
     }
 
     if (!isset($atual['ponteiros'])) {
