@@ -77,6 +77,7 @@ kit não chegava a projeto nenhum.
 | Arquivo | O quê |
 |---|---|
 | [`INSTALAR.md`](INSTALAR.md) | o passo a passo completo, incluindo as oito decisões que só você pode tomar |
+| [`MIGRAR.md`](MIGRAR.md) | da geração 1 (scripts copiados) para o pacote — destilado de uma migração real |
 | [`METODO.md`](METODO.md) | os 14 princípios, a cadeia de documentos, e o erro concreto que gerou cada regra |
 | [`RAG.md`](RAG.md) | planejamento de índice semântico, independente de fornecedor |
 | [`RAG-HINDSIGHT.md`](RAG-HINDSIGHT.md) | o mesmo, traduzido para o Hindsight — descartável quando trocar |
