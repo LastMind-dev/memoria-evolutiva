@@ -85,7 +85,9 @@
         "extratores": [
             "mapa-diretorios",
             "cadeia-documentos"
-        ]
+        ],
+        "_leia_extensao": "Arquivo DO PROJETO com extratores próprios (return ['nome' => ['id'=>..., 'fn'=>closure], ...]). É assim que o projeto acrescenta geradores — tabelas, rotas, comandos — sem tocar no vendor. Chave repetida sobrescreve o extrator embutido. Declare cada nome também em `extratores`.",
+        "extensao_do_projeto": null
     },
     "catraca": {
         "_leia": "Regras grepáveis, medidas e congeladas. Falha só se o número aumentar. Regra que exige entender semântica não vira catraca — fica documental.",

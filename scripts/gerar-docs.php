@@ -345,6 +345,50 @@ $mapa = [
     'cadeia-documentos' => ['fn' => 'extrator_cadeiaDocumentos', 'id' => 'GERADO-CADEIA'],
 ];
 
+/*
+ * EXTRATORES DO PROJETO — a fresta que a migração do primeiro projeto real exigiu.
+ *
+ * Quando o gerador morava em scripts/ do projeto, acrescentar um extrator era editar o
+ * arquivo. Via Composer ele mora no vendor — e vendor não se edita. Sem esta fresta, o
+ * primeiro projeto migrado PERDERIA seus quatro extratores próprios (tabelas do banco,
+ * comandos artisan, rotas, mapa customizado), e os arquivos gerados ficariam órfãos:
+ * passariam na verificação para sempre, envelhecendo em silêncio — a mentira exata que
+ * o método existe para impedir.
+ *
+ * O arquivo declarado em `gerado.extensao_do_projeto` é do PROJETO, versionado nele, e
+ * devolve um array no mesmo formato do $mapa acima:
+ *
+ *     return [
+ *         'tabelas' => ['id' => 'GERADO-TABELAS', 'fn' => function (array $c): array {
+ *             return ['Tabelas do banco', $corpo];
+ *         }],
+ *     ];
+ *
+ * Chave repetida SOBRESCREVE o extrator embutido — é assim que um projeto troca o mapa
+ * genérico pelo seu. O nome da chave vira o nome do arquivo: `<chave>.md`.
+ */
+$extensao = $c['gerado']['extensao_do_projeto'] ?? null;
+if ($extensao) {
+    $absExt = raiz() . '/' . ltrim($extensao, '/');
+    if (!is_file($absExt)) {
+        fwrite(STDERR, "`gerado.extensao_do_projeto` aponta para `{$extensao}`, que não existe.\n");
+        fwrite(STDERR, "Crie o arquivo ou remova a chave do padrao.json.\n");
+        exit(2);
+    }
+    $extras = require $absExt;
+    if (!is_array($extras)) {
+        fwrite(STDERR, "`{$extensao}` precisa devolver um array de extratores (return [...];).\n");
+        exit(2);
+    }
+    foreach ($extras as $nome => $def) {
+        if (empty($def['id']) || empty($def['fn']) || !is_callable($def['fn'])) {
+            fwrite(STDERR, "Extrator `{$nome}` em `{$extensao}`: precisa de `id` e `fn` chamável.\n");
+            exit(2);
+        }
+        $mapa[$nome] = $def;
+    }
+}
+
 $feitos = [];
 foreach ($c['gerado']['extratores'] ?? [] as $nome) {
     if (!isset($mapa[$nome])) {
@@ -352,7 +396,7 @@ foreach ($c['gerado']['extratores'] ?? [] as $nome) {
         fwrite(STDERR, "Escreva a função e registre no array \$mapa, ou remova do padrao.json.\n");
         exit(2);
     }
-    [$titulo, $corpo] = $mapa[$nome]['fn']($c);
+    [$titulo, $corpo] = call_user_func($mapa[$nome]['fn'], $c);
     $arquivo = $saida . '/' . $nome . '.md';
     file_put_contents(
         $arquivo,

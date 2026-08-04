@@ -321,6 +321,16 @@ if (is_file($modeloCr) && !is_file($mesCr)) {
     $criados[] = $mesCr;
 }
 
+/*
+ * ACHADO DA PRIMEIRA MIGRAÇÃO REAL: se o projeto JÁ TEM a cronologia do mês corrente
+ * (todo projeto vivo tem), o modelo AAAA-MM.md publicado ficava órfão na pasta — um
+ * arquivo com nome de placeholder no acervo canônico, exatamente o que este instalador
+ * promete não deixar.
+ */
+if (is_file($modeloCr) && is_file($mesCr)) {
+    @unlink($modeloCr);
+}
+
 if (!is_file($mesCr)) {
     garante($mesCr,
         "---\nid: CRONOLOGIA-{$mes}\ntipo: cronologia\nprojeto: {$projeto}\n"
