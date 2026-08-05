@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "memoria-evolutiva"
+version = "2.0.0"
+description = "Memória de projeto que sobrevive à troca de ferramenta e falha o build quando mente: docs/ canônico verificado, cadeia PRD→FDD→HLD→LLD→ADR, cronologia append-only, catraca de dívida e CI de integridade."
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.10"
+authors = [{ name = "Alexander Rechi", email = "alexander.rechi@gmail.com" }]
+keywords = ["documentation", "adr", "prd", "docs-as-code", "llm", "memoria-evolutiva"]
+
+[project.scripts]
+memoria = "memoria_evolutiva.__main__:main"
+
+[tool.setuptools]
+packages = ["memoria_evolutiva"]
+
+[tool.setuptools.package-data]
+memoria_evolutiva = ["stubs/**/*", "stubs/**/.*", "stubs/.cursor/rules/*", "stubs/.github/workflows/*"]

@@ -1,6 +1,6 @@
 {
     "name": "lastmind-dev/memoria-evolutiva",
-    "description": "Memória evolutiva para projetos de software: docs/ canônico com frontmatter verificado, cadeia PRD→FDD→HLD→LLD→ADR, cronologia append-only, catraca de dívida e CI que reprova documentação que mente. Funciona com qualquer LLM e sem nenhum.",
+    "description": "MOTOR LEGADO (PHP, arquivado — o motor mantido é o pacote Python `memoria-evolutiva`, via pipx). Memória evolutiva para projetos de software: docs/ canônico com frontmatter verificado, cadeia PRD→FDD→HLD→LLD→ADR, cronologia append-only, catraca de dívida e CI que reprova documentação que mente.",
     "type": "library",
     "license": "MIT",
     "keywords": ["documentation", "adr", "prd", "docs-as-code", "llm", "memoria-evolutiva"],
@@ -10,7 +10,7 @@
     "require": {
         "php": ">=8.1"
     },
-    "bin": ["bin/memoria"],
+    "bin": ["legado-php/bin/memoria"],
     "config": {
         "sort-packages": true
     }

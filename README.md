@@ -5,42 +5,40 @@ mente**: `docs/` canônico com frontmatter verificado, cadeia PRD → FDD → HL
 cronologia append-only, catraca de dívida legada e CI de integridade.
 
 Nada aqui depende de fornecedor. São arquivos markdown versionados no seu repositório,
-verificados por scripts PHP sem nenhuma dependência externa. Qualquer LLM — hoje ou daqui
-a dois anos, em qualquer ferramenta — abre o repositório e sabe onde o projeto está. E se
-todas as ferramentas de IA sumirem, a memória continua lá.
+verificados por um pacote Python **sem nenhuma dependência além da biblioteca padrão**.
+Qualquer LLM — hoje ou daqui a dois anos, em qualquer ferramenta — abre o repositório e
+sabe onde o projeto está. E se todas as ferramentas de IA sumirem, a memória continua lá.
 
 ## Instalar
 
 ```bash
-composer require --dev lastmind-dev/memoria-evolutiva
-vendor/bin/memoria instalar --projeto="meu-app" --codigo=src
+pipx install memoria-evolutiva     # ou: pip install memoria-evolutiva
+cd meu-projeto
+memoria instalar --projeto="meu-app" --codigo=src
 ```
 
 O instalador publica no projeto o que é **do projeto** — a árvore `docs/` com os quatro
 arquivos de entrada, os moldes de PRD/FDD/HLD/LLD/ADR, o `padrao.json` comentado, os
 ponteiros (`CLAUDE.md`, `AGENTS.md`, `.cursor/`, `.windsurfrules`) e o workflow de CI.
-Nunca sobrescreve nada que já exista. Os validadores ficam no `vendor/`, onde `composer
-update` os atualiza — no projeto não mora nenhuma cópia de script para divergir.
+Nunca sobrescreve nada que já exista. Os validadores ficam no pacote, onde `pipx
+upgrade` os atualiza — no projeto não mora nenhuma cópia de script para divergir.
 
 Depois de preencher os quatro arquivos de entrada (leia o `INSTALAR.md` — ele conduz as
 oito decisões, e `EXEMPLO-PROJETO-PREENCHIDO.md` mostra como fica um `PROJETO.md` de
 verdade):
 
 ```bash
-vendor/bin/memoria gerar             # extrai do código o que não se escreve à mão
-vendor/bin/memoria catraca --medir   # congela a dívida atual (só na instalação)
-vendor/bin/memoria verificar         # validar + catraca + indice
-vendor/bin/memoria autoteste         # os validadores pegam mesmo o que prometem?
+memoria gerar             # extrai do código o que não se escreve à mão
+memoria catraca --medir   # congela a dívida atual (só na instalação)
+memoria verificar         # validar + catraca + indice
+memoria autoteste         # os validadores pegam mesmo o que prometem?
 git add -A && git commit -m "estrutura de memória evolutiva"
 ```
 
-Enquanto o pacote não estiver no Packagist, instale direto do GitHub acrescentando ao
-`composer.json` do projeto:
+Enquanto o pacote não estiver no PyPI, instale direto do GitHub:
 
-```json
-"repositories": [
-    { "type": "vcs", "url": "https://github.com/LastMind-dev/memoria-evolutiva" }
-]
+```bash
+pipx install git+https://github.com/LastMind-dev/memoria-evolutiva.git
 ```
 
 ## Os comandos
@@ -59,13 +57,21 @@ Enquanto o pacote não estiver no Packagist, instale direto do GitHub acrescenta
 Rode sempre a partir da raiz do projeto. Nenhum comando sobe framework, toca banco ou
 faz rede.
 
+## Extratores próprios do projeto
+
+O gerador aceita extratores **do projeto**, em qualquer linguagem: um executável
+declarado em `padrao.json` → `gerado.extensao_do_projeto` que imprime JSON no stdout —
+`[{"nome","id","titulo","corpo"}]`. Um `nome` igual ao de um extrator embutido o
+sobrescreve. Modelo pronto em [`exemplos/extratores-projeto.py`](exemplos/extratores-projeto.py);
+o primeiro projeto migrado mantém os dele em PHP, pelo mesmo protocolo.
+
 ## O que fica onde — e por quê
 
 | | Mora em | Atualiza como |
 |---|---|---|
-| validadores e gerador | `vendor/` | `composer update` |
-| `padrao.json`, `docs/`, workflow | **seu repositório** | são seus; o pacote nunca os toca depois de publicados |
-| METODO, RAG, exemplos | `vendor/lastmind-dev/memoria-evolutiva/` | material de referência; leia de lá, não copie |
+| validadores e gerador | o pacote (pipx/pip) | `pipx upgrade memoria-evolutiva` |
+| `padrao.json`, `docs/`, workflow, extratores próprios | **seu repositório** | são seus; o pacote nunca os toca depois de publicados |
+| METODO, RAG, exemplos | este repositório | material de referência; leia daqui, não copie |
 
 Essa divisão é o próprio método aplicado a ele mesmo: os scripts têm **um dono** (este
 pacote), e o conteúdo do projeto tem outro (você). Quando o kit era copiado para dentro
@@ -85,6 +91,15 @@ kit não chegava a projeto nenhum.
 
 ## Requisitos
 
-PHP ≥ 8.1 com as extensões padrão. Só isso — sem framework, sem banco, sem serviço. O
+Python ≥ 3.10, biblioteca padrão apenas — sem framework, sem banco, sem serviço. O
 projeto documentado pode ser em qualquer linguagem: o que o gerador varre é configurável
-em `padrao.json` → `gerado`.
+em `padrao.json` → `gerado`, e os extratores próprios rodam na linguagem do projeto.
+
+## Motor legado em PHP
+
+A primeira implementação, em PHP, está arquivada em [`legado-php/`](legado-php/LEIA-ME.md)
+— congelada com paridade byte a byte comprovada contra o motor Python, funcional via
+`composer require lastmind-dev/memoria-evolutiva`, mas sem manutenção. Correções e regras
+novas entram só aqui. Para trocar de motor: `pipx install memoria-evolutiva`, depois
+`memoria gerar` uma vez (a linha `> Gerado por ...` dos derivados muda) e `memoria
+verificar`.

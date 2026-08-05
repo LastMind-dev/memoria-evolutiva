@@ -1,0 +1,75 @@
+name: Documentação
+
+# Impede que a documentação canônica volte a mentir.
+#
+# Os validadores vêm do pacote `memoria-evolutiva` (Python), instalado via pip — sem
+# dependências além da biblioteca padrão. Quatro verificações, com severidades
+# DELIBERADAMENTE diferentes:
+#
+#   memoria validar     FALHA DURA para documento que tem frontmatter. Âncora quebrada,
+#                       vocabulário inválido, id duplicado, cadeia rompida ou derivado
+#                       editado à mão quebram o build no commit que causou.
+#
+#   memoria catraca     CATRACA. Mede a dívida existente e falha só se aumentar.
+#                       Quando a regra nasce depois do código, reprovar tudo trava o
+#                       time sem consertar nada — e build que nasce vermelho ninguém olha.
+#
+#   memoria indice      O índice semântico costuma ser alcançado por ferramenta que
+#                       roda na máquina de quem trabalha, não aqui. Este passo NÃO
+#                       reindexa: torna visível que precisa.
+#
+#   memoria autoteste   Quebra uma cópia do projeto de propósito e confere que cada
+#                       validador reclama do que promete. Verificador que não reprova
+#                       nada é indistinguível de verificador quebrado.
+#
+# Nenhum sobe framework, toca banco ou faz rede.
+#
+# Se os extratores próprios do projeto (`gerado.extensao_do_projeto`) forem escritos
+# em outra linguagem, instale o interpretador dela aqui — ex.: PHP via
+# shivammathur/setup-php@v2 antes do passo de validar.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  documentacao:
+    name: Integridade da documentação
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # a verificação compara verificado_commit com o HEAD; precisa do histórico
+          fetch-depth: 0
+
+      - name: Instalar Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Instalar os validadores
+        run: pip install memoria-evolutiva
+
+      - name: Estrutura, âncoras, cadeia e derivados
+        run: memoria validar
+
+      - name: Catraca da dívida
+        run: memoria catraca
+
+      - name: Índice em dia
+        run: memoria indice
+
+      - name: Os validadores ainda pegam o que prometem
+        run: memoria autoteste
+
+      - name: O que fazer quando falha
+        if: failure()
+        run: |
+          echo "::notice::Derivado divergente → rode 'memoria gerar' e commite a saída."
+          echo "::notice::Catraca → código novo introduziu violação. Ver docs/politicas/."
+          echo "::notice::Índice → reindexe os documentos listados e rode 'memoria indice --marcar'."
+          echo "::notice::Âncora quebrada → o documento cita arquivo que não existe. O código ganha."
+          echo "::notice::Cadeia → deriva_de aponta para documento inexistente, invertido ou superado."

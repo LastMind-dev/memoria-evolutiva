@@ -1,0 +1,221 @@
+"""lib — o que todos os comandos do padrão compartilham.
+
+Porte fiel de scripts/lib-padrao.php (a versão de referência até a paridade ser provada;
+depois, esta é a canônica e a PHP fica arquivada). Tudo aqui existe porque foi bug em
+produção pelo menos uma vez — os comentários dizem qual. Apagar o comentário costuma ser
+o primeiro passo para o bug voltar.
+
+COMPATIBILIDADE É CONTRATO: `hash_do_conteudo`, o formato do baseline, o formato do
+marcador e as mensagens de erro precisam ser IDÊNTICOS aos da versão PHP — os marcadores
+e baselines dos projetos existentes foram gravados por ela, e um hash diferente
+invalidaria todos sem que nada tenha mudado de verdade.
+"""
+
+from __future__ import annotations
+
+import hashlib
+import json
+import os
+import re
+import subprocess
+import sys
+from functools import lru_cache
+from pathlib import Path
+
+
+def barras(caminho: str) -> str:
+    """Normaliza separador para barra normal.
+
+    ESTE É O BUG MAIS PERIGOSO DA FAMÍLIA, porque não dá erro nenhum. No Windows os
+    caminhos vêm com ``\\``, e uma comparação como ``'/Services/' in caminho``
+    simplesmente não casa — o filtro passa batido e a contagem sai errada em silêncio.
+    Num caso real: 73 em vez de 71, percebido só porque o número certo estava escrito
+    num documento.
+    """
+    return caminho.replace("\\", "/")
+
+
+@lru_cache(maxsize=1)
+def raiz() -> str:
+    """Raiz do PROJETO — não do pacote.
+
+    Sobe do diretório corrente até achar ``padrao.json``. É o que faz o mesmo código
+    funcionar instalado via pipx, via vendor, ou avulso — e chamado de um subdiretório.
+    Num projeto virgem (instalador) devolve o cwd: RODE O INSTALADOR NA RAIZ.
+    """
+    dir_ = barras(os.getcwd())
+    sobe = Path(dir_)
+    while True:
+        if (sobe / "padrao.json").is_file():
+            return barras(str(sobe))
+        if sobe.parent == sobe:
+            return dir_
+        sobe = sobe.parent
+
+
+def pacote() -> str:
+    """Raiz do PACOTE — onde moram stubs/ e os documentos do método."""
+    return barras(str(Path(__file__).resolve().parent))
+
+
+def morre(mensagem: str) -> "None":
+    sys.stderr.write(mensagem)
+    raise SystemExit(2)
+
+
+@lru_cache(maxsize=1)
+def config() -> dict:
+    """Lê e valida o padrao.json. Morre com mensagem útil se estiver quebrado."""
+    arquivo = Path(raiz()) / "padrao.json"
+    if not arquivo.is_file():
+        morre(
+            "Não encontrei `padrao.json` na raiz do projeto.\n"
+            "Ele é o único arquivo que você edita para adaptar o padrão.\n"
+            "Rode: memoria instalar\n"
+        )
+    try:
+        c = json.loads(arquivo.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as e:
+        morre(f"`padrao.json` não é JSON válido: {e.msg}\n")
+    if not isinstance(c, dict):
+        morre("`padrao.json` não é JSON válido: raiz precisa ser objeto\n")
+    for obrigatorio in ("projeto", "acervos", "vocabulario"):
+        if obrigatorio not in c:
+            morre(f"`padrao.json` não tem a chave obrigatória `{obrigatorio}`.\n")
+    if not c["acervos"].get("canonico"):
+        morre("`padrao.json`: `acervos.canonico` é obrigatório — é onde a verdade mora.\n")
+    return c
+
+
+def acervo() -> str:
+    """Caminho absoluto do acervo canônico."""
+    return raiz() + "/" + config()["acervos"]["canonico"].strip("/")
+
+
+def arquivos_por_extensao(dir_: str, ext: str) -> list[str]:
+    """Todos os arquivos de uma extensão dentro de um diretório, recursivo e ORDENADO.
+
+    Ordenado porque saída de gerador precisa ser reprodutível — a ordem de leitura do
+    sistema de arquivos não é garantida, e um diff que muda sem nada ter mudado vira
+    ruído que todo mundo aprende a ignorar.
+    """
+    p = Path(dir_)
+    if not p.is_dir():
+        return []
+    ext = ext.lower()
+    out = [barras(str(f)) for f in p.rglob("*") if f.is_file() and f.suffix.lower() == "." + ext]
+    out.sort()
+    return out
+
+
+def markdowns(dir_: str) -> list[str]:
+    return arquivos_por_extensao(dir_, "md")
+
+
+def relativo(absoluto: str) -> str:
+    return barras(absoluto).replace(raiz() + "/", "", 1)
+
+
+def comeca_com(caminho: str, prefixos: list[str]) -> bool:
+    caminho = barras(caminho)
+    for p in prefixos or []:
+        if not p:
+            continue
+        if caminho.startswith(p.rstrip("/") + "/") or caminho == p.rstrip("/"):
+            return True
+    return False
+
+
+def contem_algum(caminho: str, trechos: list[str]) -> bool:
+    """Usado pelas exclusões dos contadores: casa por TRECHO de caminho, não por pasta."""
+    caminho = barras(caminho)
+    return any(t and t in caminho for t in trechos or [])
+
+
+def frontmatter(conteudo: str) -> dict | None:
+    """Frontmatter YAML simples — `chave: valor`, listas com `- ` e blocos `>-`.
+
+    Deliberadamente não usa parser YAML completo: o padrão só precisa de chave/valor e
+    lista, e uma dependência externa tornaria o kit mais difícil de instalar do que o
+    problema que ele resolve. Porte 1:1 do PHP — o comportamento nos casos estranhos
+    precisa ser o MESMO, senão a paridade quebra em documento de borda.
+    """
+    if not conteudo.startswith("---\n"):
+        return None
+    fim = conteudo.find("\n---", 4)
+    if fim == -1:
+        return None
+    bloco = conteudo[4:fim]
+
+    dados: dict = {}
+    chave: str | None = None
+    dobra = False
+
+    for linha in bloco.split("\n"):
+        if dobra:
+            if re.match(r"^\s+\S", linha):
+                dados[chave] = (str(dados[chave]) + " " + linha.strip()).strip()
+                continue
+            dobra = False
+        m = re.match(r"^([a-z_]+):\s*>-?\s*$", linha)
+        if m:
+            chave = m.group(1)
+            dados[chave] = ""
+            dobra = True
+            continue
+        m = re.match(r"^\s+-\s+(.+)$", linha)
+        if m and chave is not None and isinstance(dados.get(chave), list):
+            dados[chave].append(m.group(1).strip().strip("\"'"))
+            continue
+        m = re.match(r"^([a-z_]+):\s*(.*)$", linha)
+        if m:
+            chave = m.group(1)
+            valor = m.group(2).strip()
+            if valor == "":
+                dados[chave] = []
+            elif valor == "[]":
+                dados[chave] = []
+                chave = None
+            else:
+                dados[chave] = valor.strip(" \"'")
+                chave = None
+    return dados
+
+
+def hash_do_conteudo(conteudo: str) -> str:
+    """Hash do conteúdo ignorando o carimbo de geração.
+
+    `verificado_em`, `verificado_commit` e a linha "Gerado ... em `sha`." mudam a cada
+    commit sem que o fato mude. Sem esta normalização o índice viveria "defasado" por
+    causa de um carimbo.
+
+    ⚠️ CONTRATO DE COMPATIBILIDADE: precisa produzir EXATAMENTE o mesmo hash da versão
+    PHP — os marcadores existentes (`docs/.rag-indexado.json` e afins) foram gravados
+    por ela. O teste de paridade compara os dois byte a byte.
+    """
+    limpo = re.sub(r"^verificado_(em|commit): .*$", "X", conteudo, flags=re.M)
+    limpo = re.sub(r"em `[^`]*`\.$", "em `X`.", limpo, flags=re.M)
+    return hashlib.sha256(limpo.encode("utf-8")).hexdigest()[:16]
+
+
+def commit_atual() -> str:
+    """Sha curto do commit atual, ou string vazia se não houver git."""
+    try:
+        r = subprocess.run(
+            ["git", "-C", raiz(), "rev-parse", "--short", "HEAD"],
+            capture_output=True, text=True, timeout=15,
+        )
+        return r.stdout.strip() if r.returncode == 0 else ""
+    except Exception:
+        return ""
+
+
+def titulo(texto: str) -> None:
+    print(f"\n{texto}")
+    print("─" * min(len(texto), 72))
+
+
+def limpar_caches() -> None:
+    """Para o autoteste, que roda vários projetos no mesmo processo — nunca em CLI normal."""
+    raiz.cache_clear()
+    config.cache_clear()

@@ -3,6 +3,10 @@ name: Testes do pacote
 # O pacote que valida os outros precisa se validar. Este workflow instala o padrão num
 # projeto sintético e confere que a bateria inteira fica verde — inclusive o autoteste,
 # que quebra o projeto de propósito e confere que cada validador reclama.
+#
+# O motor testado é o Python (o mantido). O legado-php/ é arquivo morto: fica no
+# repositório para quem já depende dele via Composer, mas não entra no CI — testar o
+# que não se mantém é prometer o que não se cumpre.
 
 on:
   push:
@@ -17,11 +21,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Instalar PHP
-        uses: shivammathur/setup-php@v2
+      - name: Instalar Python
+        uses: actions/setup-python@v5
         with:
-          php-version: '8.3'
-          coverage: none
+          python-version: '3.11'
+
+      - name: Instalar o pacote
+        run: pip install $GITHUB_WORKSPACE
 
       - name: Montar projeto sintético
         run: |
@@ -32,23 +38,30 @@ jobs:
           git -c user.email=ci@ci -c user.name=ci commit -m fixture
 
       - name: Instalar o padrão
-        run: cd /tmp/fixture && php $GITHUB_WORKSPACE/scripts/iniciar-estrutura.php --projeto="fixture" --codigo=src
+        run: cd /tmp/fixture && memoria instalar --projeto="fixture" --codigo=src
 
       - name: Gerar derivados e congelar a dívida
         run: |
           cd /tmp/fixture
-          php $GITHUB_WORKSPACE/scripts/gerar-docs.php
-          php $GITHUB_WORKSPACE/scripts/validar-catraca.php --medir
+          memoria gerar
+          memoria catraca --medir
 
       - name: Bateria completa
         run: |
           cd /tmp/fixture
-          php $GITHUB_WORKSPACE/scripts/validar-docs.php
-          php $GITHUB_WORKSPACE/scripts/validar-catraca.php
-          php $GITHUB_WORKSPACE/scripts/validar-indice.php
-          php $GITHUB_WORKSPACE/scripts/autoteste.php
+          memoria validar
+          memoria catraca
+          memoria indice
+          memoria autoteste
+
+      - name: Protocolo neutro de extratores (o exemplo do repositório funciona)
+        run: |
+          cd /tmp/fixture
+          mkdir -p scripts
+          cp $GITHUB_WORKSPACE/exemplos/extratores-projeto.py scripts/
+          python3 scripts/extratores-projeto.py | python3 -c "import json,sys; d=json.load(sys.stdin); assert all(k in d[0] for k in ('nome','id','titulo','corpo')), d"
 
       - name: A árvore continua limpa depois de validar
         run: |
           cd /tmp/fixture && git add -A
-          git diff --cached --stat -- . ':!docs' ':!padrao.json' ':!.github' ':!AGENTS.md' ':!CLAUDE.md' ':!.cursor' ':!.windsurfrules'
+          git diff --cached --stat -- . ':!docs' ':!padrao.json' ':!.github' ':!AGENTS.md' ':!CLAUDE.md' ':!.cursor' ':!.windsurfrules' ':!scripts'

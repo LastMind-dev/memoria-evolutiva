@@ -3,8 +3,8 @@
 Este é o caminho prático. O **porquê** de cada peça está no `METODO.md`; leia depois,
 ou quando alguma decisão da Parte IV parecer arbitrária.
 
-> **O caminho recomendado é via Composer** — os validadores ficam no `vendor/`, com um
-> dono só, e `composer update` corrige todos os seus projetos de uma vez. Quando o kit
+> **O caminho recomendado é via pipx** — os validadores ficam no pacote, com um
+> dono só, e `pipx upgrade` corrige todos os seus projetos de uma vez. Quando o kit
 > era copiado para dentro de cada projeto, cada cópia dos scripts era uma bifurcação
 > esperando acontecer: bug corrigido no kit não chegava a projeto nenhum. É o próprio
 > método aplicado a ele mesmo — um fato, um dono.
@@ -18,9 +18,9 @@ manter a história do projeto de forma que qualquer modelo de linguagem — hoje
 a dois anos, em qualquer ferramenta — consiga abrir o repositório e saber onde o
 projeto está sem que ninguém precise explicar.
 
-Não depende de nenhum fornecedor. São arquivos markdown no seu repositório, mais um pacote
-Composer de validadores sem dependência externa. Se todas as ferramentas de IA que você usa hoje
-desaparecerem, a memória continua lá.
+Não depende de nenhum fornecedor. São arquivos markdown no seu repositório, mais um
+pacote Python de validadores sem dependência além da biblioteca padrão. Se todas as
+ferramentas de IA que você usa hoje desaparecerem, a memória continua lá.
 
 ---
 
@@ -42,27 +42,26 @@ Projeto novo: pode pular direto para o passo 1.
 ## 1. Instale o pacote
 
 ```bash
-composer require --dev lastmind-dev/memoria-evolutiva
+pipx install memoria-evolutiva     # ou: pip install memoria-evolutiva
 ```
 
-Enquanto não estiver no Packagist, acrescente antes ao `composer.json` do projeto:
+Enquanto não estiver no PyPI, instale direto do GitHub:
 
-```json
-"repositories": [
-    { "type": "vcs", "url": "https://github.com/LastMind-dev/memoria-evolutiva" }
-]
+```bash
+pipx install git+https://github.com/LastMind-dev/memoria-evolutiva.git
 ```
 
-Isso traz os validadores para `vendor/` e o comando `vendor/bin/memoria`. **Nenhum
-script é copiado para o seu repositório** — no projeto só vai morar o que é seu.
+Isso traz o comando `memoria` para o seu PATH. **Nenhum script é copiado para o seu
+repositório** — no projeto só vai morar o que é seu. `pipx upgrade memoria-evolutiva`
+atualiza os validadores para todos os projetos de uma vez.
 
 Os documentos do método (`METODO.md`, `RAG.md`, este arquivo, o exemplo preenchido)
-ficam em `vendor/lastmind-dev/memoria-evolutiva/` — leia de lá, não copie.
+ficam no repositório do pacote — leia de lá, não copie.
 
-> **Projeto sem Composer?** Baixe o repositório do pacote para qualquer pasta fora do
-> projeto e rode `php <pasta>/scripts/iniciar-estrutura.php` a partir da raiz do
-> projeto. Tudo funciona igual; só os comandos ficam mais longos, e o workflow de CI
-> publicado assume Composer — ajuste-o.
+> **O projeto não é Python?** Não importa: o pacote só precisa de um Python ≥ 3.10 na
+> máquina (e no runner de CI). O projeto documentado pode ser em qualquer linguagem —
+> o que o gerador varre é configurável, e os extratores próprios rodam na linguagem
+> do projeto.
 
 Se o projeto já tem um `CLAUDE.md` ou `AGENTS.md` com conteúdo, atenção no passo
 seguinte: o instalador nunca sobrescreve nada, mas o conteúdo que estiver lá é fato de
@@ -72,7 +71,7 @@ deixe o ponteiro.
 ## 2. Rode o instalador — na raiz do projeto
 
 ```bash
-vendor/bin/memoria instalar --projeto="meu-app" --codigo=src
+memoria instalar --projeto="meu-app" --codigo=src
 ```
 
 Ele publica no projeto o que é do projeto: a árvore `docs/` com os quatro arquivos de
@@ -163,10 +162,10 @@ que é gerado e o núcleo do índice. Elas moram neste arquivo, não no `PROJETO
 ## 5. Gere, meça, verifique
 
 ```bash
-vendor/bin/memoria gerar                  # extrai do código o que não se escreve à mão
-vendor/bin/memoria catraca --medir     # congela a dívida atual como linha de base
-vendor/bin/memoria validar                # precisa passar
-vendor/bin/memoria autoteste                   # os validadores pegam mesmo o que prometem?
+memoria gerar                  # extrai do código o que não se escreve à mão
+memoria catraca --medir     # congela a dívida atual como linha de base
+memoria validar                # precisa passar
+memoria autoteste                   # os validadores pegam mesmo o que prometem?
 ```
 
 **Olhe a saída do gerador pelo menos uma vez.** A verificação de derivado confere se a
@@ -193,7 +192,7 @@ Preencha `docs/runbooks/indexacao.md` com o procedimento deste projeto, indexe o
 listado em `padrao.json` → `memoria.nucleo`, e **só então**:
 
 ```bash
-vendor/bin/memoria indice --marcar
+memoria indice --marcar
 ```
 
 Marcar sem indexar de verdade transforma a verificação em teatro.

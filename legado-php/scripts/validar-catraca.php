@@ -122,7 +122,7 @@ if (!is_file($base)) {
 
 $json    = json_decode((string) file_get_contents($base), true);
 $ref     = $json['contagens'] ?? [];
-$quando  = $json['medido_em'] ?? '?';
+$quando  = $json['medido_em'] ?? $json['gerado_em'] ?? '?'; // gerado_em: linha de base herdada da geração 1
 $piorou  = $melhorou = [];
 
 foreach ($atual as $k => $v) {

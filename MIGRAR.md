@@ -1,4 +1,4 @@
-# Migrar da geração 1 (scripts copiados) para o pacote Composer
+# Migrar da geração 1 (scripts copiados) para o pacote
 
 Para projetos que instalaram o kit quando os validadores eram copiados para `scripts/`
 do próprio repositório. Este guia foi **destilado de uma migração real** — o DAZASYNC,
@@ -21,7 +21,9 @@ git add -A && git commit -m "foto de entrada: pré-migração"
 ## 1. Instale o pacote
 
 ```bash
-composer require --dev lastmind-dev/memoria-evolutiva
+pipx install memoria-evolutiva
+# enquanto não estiver no PyPI:
+pipx install git+https://github.com/LastMind-dev/memoria-evolutiva.git
 ```
 
 Não rode `memoria instalar` ainda — primeiro o `padrao.json`, senão o instalador escreve
@@ -51,7 +53,7 @@ Porte cada contador do script antigo para o formato de config (`regex`,
 viram `exige`), e então:
 
 ```bash
-vendor/bin/memoria catraca      # SEM --medir
+memoria catraca      # SEM --medir
 ```
 
 **Todo contador tem que bater exatamente com a base antiga.** Na migração de referência:
@@ -69,13 +71,13 @@ Sem este passo os arquivos gerados ficam **órfãos**: passam na verificação p
 (nada os regenera, nada os muda) e envelhecem em silêncio — a mentira exata que o método
 combate.
 
-Depois: `vendor/bin/memoria gerar` e **commite** — o envelope dos arquivos muda uma vez
+Depois: `memoria gerar` e **commite** — o envelope dos arquivos muda uma vez
 (cabeçalho novo), o conteúdo não deve mudar. Leia o diff para confirmar.
 
 ## 5. Rode o instalador — e reconcilie o que ele publica
 
 ```bash
-vendor/bin/memoria instalar --projeto="<o-mesmo-do-padrao.json>" --codigo=<pasta> --indice=<ferramenta>
+memoria instalar --projeto="<o-mesmo-do-padrao.json>" --codigo=<pasta> --indice=<ferramenta>
 ```
 
 Ele nunca sobrescreve; mas **publica coisas que o seu projeto v1 talvez já tenha com
@@ -93,7 +95,7 @@ outro nome**, e aí nascem duas jurisdições para o mesmo assunto:
 grep -rn "php scripts/" docs/ *.md | grep -v _arquivo
 ```
 
-Cada ocorrência vira o comando `vendor/bin/memoria` equivalente. **Não confie só no
+Cada ocorrência vira o comando `memoria` equivalente. **Não confie só no
 validador aqui**: âncoras quebradas ele pega (o runbook que ancorava nos scripts
 arquivados quebrou o build na hora), mas **comando citado em prosa ele não lê** — na
 migração de referência, o `PROJETO.md` §6/§7 ficou mandando rodar scripts extintos e só
@@ -114,29 +116,31 @@ Script que não tem equivalente no pacote (verificador de vault, utilitários se
 
 ## 8. Troque o CI
 
-```bash
-cp vendor/lastmind-dev/memoria-evolutiva/stubs/.github/workflows/documentacao.yml .github/workflows/
-```
+Copie o stub do pacote (no repositório: `memoria_evolutiva/stubs/.github/workflows/documentacao.yml`)
+para `.github/workflows/` do projeto — ou rode `memoria instalar` de novo: ele publica o
+que faltar sem sobrescrever o que existe.
 
-Confira `branches:` se o repositório não usa `main`.
+Confira `branches:` se o repositório não usa `main`. Se os seus extratores próprios são
+noutra linguagem (ex.: PHP), acrescente o interpretador dela no workflow — o stub tem o
+comentário indicando onde.
 
 ## 9. Índice: o vermelho esperado, e o único jeito honesto de sair dele
 
-`vendor/bin/memoria indice` vai reprovar listando exatamente: os docs que a migração
+`memoria indice` vai reprovar listando exatamente: os docs que a migração
 alterou (runbook, gerados) e os que ela criou. **Isso é o sistema funcionando.**
 
 1. Reindexe esses documentos **de verdade** na sua ferramenta (delete → retain, com
    proveniência).
 2. Se você alinhar o núcleo à recomendação do `RAG.md` (tirar `docs/gerado/` — derivado
    não se indexa), **purgue os registros de gerado** do índice.
-3. Só então: `vendor/bin/memoria indice --marcar`.
+3. Só então: `memoria indice --marcar`.
 
 Marcar sem indexar transforma a verificação em teatro.
 
 ## 10. Feche
 
 ```bash
-vendor/bin/memoria verificar && vendor/bin/memoria autoteste
+memoria verificar && memoria autoteste
 ```
 
 Entrada na cronologia contando a migração (ferramenta trocada, baseline preservada por
@@ -149,13 +153,47 @@ ela respondeu 8 de 8 perguntas e ainda achou o que este guia agora manda varrer.
 ## Checklist
 
 - [ ] branch/cópia + commit de entrada
-- [ ] `composer require` (pacote no vendor)
+- [ ] `pipx install` (o comando `memoria` no PATH)
 - [ ] `padrao.json` escrito da realidade (nome, vocabulário, núcleo, marcador v1)
 - [ ] contadores portados · `memoria catraca` **sem** `--medir` · paridade exata
-- [ ] extratores próprios em `scripts/extratores-projeto.php` · `gerar` · diff só de envelope
+- [ ] extratores próprios em `scripts/extratores-projeto.<ext>` (protocolo neutro: executável → JSON) · `gerar` · diff só de envelope
 - [ ] `memoria instalar` · publicados reconciliados (runbook de sessão, pastas duplicadas)
 - [ ] `grep -rn "php scripts/" docs/ *.md` → zero fora de `_arquivo`
 - [ ] scripts v1 arquivados; os só-seus ficam
 - [ ] CI trocado
 - [ ] índice: reindexar de verdade → purgar gerado → `--marcar`
 - [ ] `verificar` + `autoteste` verdes · cronologia + ESTADO · leitura fria
+
+
+---
+
+## Anexo — trocar de MOTOR (PHP legado → Python), sem migrar nada
+
+Para projetos que já estão na geração 2 via Composer (`vendor/bin/memoria`) e vão para o
+motor Python. Não é migração: o conteúdo, a baseline e o marcador de índice **já são
+compatíveis** (paridade byte a byte, provada na árvore de referência — mesmos números de
+catraca, marcador lido verde nos dois sentidos).
+
+```bash
+pipx install memoria-evolutiva
+memoria validar          # deve reprovar SÓ os derivados — ver abaixo
+memoria gerar            # a linha "> Gerado por ..." muda de motor; regere UMA vez
+memoria verificar        # verde
+git add -A && git commit -m "motor de validação: vendor/bin/memoria → memoria (pipx)"
+```
+
+1. **Os derivados reprovam uma vez, por desenho.** O envelope dos arquivos gerados
+   carimba o motor (`> Gerado por ...`). `memoria gerar` + commit resolve; qualquer
+   outra falha de `validar` é problema real — pare e olhe.
+2. **Extratores próprios**: o arquivo declarado em `gerado.extensao_do_projeto` precisa
+   falar o protocolo neutro — executável que imprime JSON no stdout. Se ele era um
+   `return [...]` PHP da era Composer, acrescente o bloco de modo CLI (o do projeto de
+   referência, `scripts/extratores-projeto.php`, mostra o padrão: `if (realpath($argv[0])
+   === __FILE__) { ... echo json_encode(...); exit(0); }` antes do `return`). O motor
+   PHP continua aceitando o mesmo arquivo.
+3. **Comandos documentados**: `grep -rn "vendor/bin/memoria" docs/ *.md .github/` e troque
+   pelo comando `memoria` — inclusive no workflow de CI (o stub novo instala Python em
+   vez de PHP).
+4. **Composer**: `composer remove --dev lastmind-dev/memoria-evolutiva` quando nada mais
+   citar `vendor/bin/memoria`. Se os extratores próprios são em PHP, o PHP da máquina
+   continua sendo usado por eles — só o vendor sai.

@@ -290,7 +290,7 @@ ancoras:                        # arquivos que este documento descreve
 
 ```markdown
 > ⚠️ ARQUIVO GERADO AUTOMATICAMENTE. Não edite à mão.
-> Gerado por `php scripts/gerar-docs.php`.
+> Gerado por `memoria gerar`.
 ```
 
 O que costuma valer a pena gerar, em ordem de utilidade — é lista de candidatos, não receita fechada. Quem decide é a regra da decisão 3 da Parte IV: **assunto sobre o qual um documento escrito à mão já errou uma vez é candidato a gerado.**

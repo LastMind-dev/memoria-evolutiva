@@ -115,7 +115,7 @@ A sequência, na ordem — e a ordem importa:
 ```
 1. delete_document(document_id: "docs/funcional/FDD-0003.md")
 2. retain(...) uma vez por seção, com o commit NOVO
-3. php scripts/validar-indice.php --marcar
+3. memoria indice --marcar
 ```
 
 Apagar antes de gravar evita o erro mais comum e mais silencioso desta ferramenta:
@@ -183,5 +183,5 @@ fecho      documento do núcleo mudou?
            documento virou superado?
              delete_document, e reindexe com status:superado (não purgue — é a resposta
              para "por que mudamos", que alguém procura seis meses depois)
-           php scripts/validar-indice.php  → tem que ficar verde
+           memoria indice  → tem que ficar verde
 ```

@@ -1,0 +1,9 @@
+---
+description: Porta de entrada do projeto
+alwaysApply: true
+---
+
+Leia `docs/PROJETO.md` antes de qualquer coisa — é a porta de entrada e diz o que ler
+em seguida. As regras de operação estão em `AGENTS.md`.
+
+Não escreva fato de projeto neste arquivo: ele é ponteiro, não fonte.
