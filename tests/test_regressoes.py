@@ -1651,9 +1651,12 @@ class BancosLocaisTest(unittest.TestCase):
         self.assertIn("[DADO-REMOVIDO:cpf-cnpj]", dados["content"])
         self.assertIn("[DADO-REMOVIDO:segredo-configuracao]", dados["content"])
         self.assertEqual("restrito", dados["metadata"]["classificacao"])
-        self.assertEqual(["produto-a"], dados["metadata"]["produtos"])
-        self.assertEqual(["tenant-a"], dados["metadata"]["tenants"])
-        self.assertGreaterEqual(dados["metadata"]["redaction_ocorrencias"], 3)
+        self.assertEqual(["produto-a"], json.loads(dados["metadata"]["produtos"]))
+        self.assertEqual(["tenant-a"], json.loads(dados["metadata"]["tenants"]))
+        self.assertGreaterEqual(int(dados["metadata"]["redaction_ocorrencias"]), 3)
+        self.assertTrue(all(
+            isinstance(valor, str) for valor in dados["metadata"].values()
+        ), "a API oficial do Hindsight aceita somente metadata textual")
         prova = marcador["prova_do_provedor"]
         self.assertEqual("redaction-deterministica-v1", prova["redaction"]["algoritmo"])
         self.assertGreaterEqual(prova["redaction"]["ocorrencias"], 3)

@@ -146,22 +146,29 @@ def _item(rel: str, conteudo: str) -> dict:
     tags.extend(f"tenant:{valor}" for valor in acesso["tenants"])
     if commit:
         tags.append(f"commit:{commit}")
+    metadata = {
+        "source_uri": rel,
+        "source_commit": commit or "",
+        "doc_id": str(fm.get("id") or ""),
+        "doc_tipo": str(fm.get("tipo") or ""),
+        "doc_status": str(fm.get("status") or ""),
+        "projeto": str(config()["projeto"]),
+        "classificacao": str(acesso["classificacao"]),
+        # A API oficial tipa metadata como map[string, string]. Preserve listas em
+        # JSON canônico: isso mantém a estrutura auditável sem depender de coerção
+        # permissiva do servidor (Hindsight 0.9.1 responde 422 para listas/inteiros).
+        "audience": json.dumps(acesso["audience"], ensure_ascii=False, separators=(",", ":")),
+        "produtos": json.dumps(acesso["produtos"], ensure_ascii=False, separators=(",", ":")),
+        "tenants": json.dumps(acesso["tenants"], ensure_ascii=False, separators=(",", ":")),
+        "redaction_algoritmo": str(auditoria["algoritmo"]),
+        "redaction_ocorrencias": str(auditoria["ocorrencias"]),
+        "redacted_sha256": str(auditoria["conteudo_sha256"]),
+    }
     return {
         "content": _conteudo_indexado(rel, conteudo),
         "context": f"Documentação canônica do projeto {config()['projeto']}; fonte {rel}.",
         "document_id": _document_id(rel),
-        "metadata": {
-            "source_uri": rel,
-            "source_commit": commit,
-            "doc_id": str(fm.get("id") or ""),
-            "doc_tipo": str(fm.get("tipo") or ""),
-            "doc_status": str(fm.get("status") or ""),
-            "projeto": str(config()["projeto"]),
-            **acesso,
-            "redaction_algoritmo": auditoria["algoritmo"],
-            "redaction_ocorrencias": auditoria["ocorrencias"],
-            "redacted_sha256": auditoria["conteudo_sha256"],
-        },
+        "metadata": metadata,
         "tags": tags,
         "update_mode": "replace",
         "timestamp": "unset",
