@@ -1,0 +1,84 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://lastmind.dev/memoria-evolutiva/schemas/baseline-avaliacao-rag-v1.schema.json",
+  "title": "Linha de base da catraca RAG",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "projeto", "corpus_sha256", "perfil_rag", "metricas", "assinatura"],
+  "properties": {
+    "schema": { "const": 1 },
+    "projeto": { "type": "string", "minLength": 1 },
+    "corpus_sha256": { "$ref": "#/$defs/sha256" },
+    "perfil_rag": { "$ref": "#/$defs/perfil_rag" },
+    "metricas": { "$ref": "#/$defs/metricas" },
+    "assinatura": { "$ref": "#/$defs/sha256" }
+  },
+  "$defs": {
+    "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "fracao": { "type": "number", "minimum": 0, "maximum": 1 },
+    "fracao_nula": {
+      "anyOf": [{ "$ref": "#/$defs/fracao" }, { "type": "null" }]
+    },
+    "perfil_nome": {
+      "enum": [
+        "engenharia-leitura", "engenharia-documentacao", "automacao-codigo",
+        "atendimento", "operacao-assistida"
+      ]
+    },
+    "perfil_rag": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["algoritmo", "perfil_fingerprint", "embedding_provedor", "embedding_modelo"],
+      "properties": {
+        "algoritmo": { "type": "string", "minLength": 1 },
+        "perfil_fingerprint": { "$ref": "#/$defs/sha256" },
+        "embedding_provedor": { "type": "string", "minLength": 1 },
+        "embedding_modelo": { "type": "string", "minLength": 1 }
+      }
+    },
+    "grupo_metricas": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "casos", "positivos", "negativos", "hit_1", "hit_3",
+        "cobertura_citacao", "cobertura_resposta", "sem_fonte", "negativos_ok"
+      ],
+      "properties": {
+        "casos": { "type": "integer", "minimum": 0 },
+        "positivos": { "type": "integer", "minimum": 0 },
+        "negativos": { "type": "integer", "minimum": 0 },
+        "hit_1": { "$ref": "#/$defs/fracao_nula" },
+        "hit_3": { "$ref": "#/$defs/fracao_nula" },
+        "cobertura_citacao": { "$ref": "#/$defs/fracao_nula" },
+        "cobertura_resposta": { "$ref": "#/$defs/fracao_nula" },
+        "sem_fonte": { "$ref": "#/$defs/fracao_nula" },
+        "negativos_ok": { "$ref": "#/$defs/fracao_nula" }
+      }
+    },
+    "por_perfil": {
+      "type": "object", "minProperties": 3,
+      "propertyNames": { "$ref": "#/$defs/perfil_nome" },
+      "additionalProperties": { "$ref": "#/$defs/grupo_metricas" }
+    },
+    "por_categoria": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["engenharia", "atendimento", "automacao"],
+      "properties": {
+        "engenharia": { "$ref": "#/$defs/grupo_metricas" },
+        "atendimento": { "$ref": "#/$defs/grupo_metricas" },
+        "automacao": { "$ref": "#/$defs/grupo_metricas" }
+      }
+    },
+    "metricas": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["global", "por_perfil", "por_categoria"],
+      "properties": {
+        "global": { "$ref": "#/$defs/grupo_metricas" },
+        "por_perfil": { "$ref": "#/$defs/por_perfil" },
+        "por_categoria": { "$ref": "#/$defs/por_categoria" }
+      }
+    }
+  }
+}

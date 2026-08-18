@@ -1,0 +1,55 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://lastmind.dev/memoria-evolutiva/schemas/manifesto-adaptadores-v1.schema.json",
+  "title": "Manifesto neutro de adaptadores de agentes",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema", "projeto", "banco", "perfil_canary", "plataformas", "gateway",
+    "gerador_versao", "artefatos"
+  ],
+  "properties": {
+    "schema": { "const": 1 },
+    "projeto": { "type": "string", "minLength": 1 },
+    "banco": { "type": ["string", "null"] },
+    "perfil_canary": { "type": "string", "minLength": 1 },
+    "plataformas": {
+      "type": "array", "minItems": 1, "uniqueItems": true,
+      "items": { "enum": ["codex", "claude", "cursor", "windsurf", "hermes"] }
+    },
+    "gateway": {
+      "type": "object", "additionalProperties": false,
+      "required": [
+        "transporte", "comando", "ferramenta", "contexto_schema",
+        "contexto_schema_sha256", "fragmentos_manifesto_sha256"
+      ],
+      "properties": {
+        "transporte": { "const": "stdio" },
+        "comando": { "const": ["memoria", "contexto", "mcp"] },
+        "ferramenta": { "const": "memoria_contexto" },
+        "contexto_schema": { "const": 2 },
+        "contexto_schema_sha256": { "$ref": "#/$defs/sha256" },
+        "fragmentos_manifesto_sha256": { "$ref": "#/$defs/sha256" }
+      }
+    },
+    "gerador_versao": { "type": "string", "minLength": 1 },
+    "artefatos": {
+      "type": "array", "minItems": 1,
+      "items": { "$ref": "#/$defs/artefato" }
+    }
+  },
+  "$defs": {
+    "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "artefato": {
+      "type": "object", "additionalProperties": false,
+      "required": ["id", "plataforma", "path", "formato", "conteudo_sha256"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "plataforma": { "enum": ["codex", "claude", "cursor", "windsurf", "hermes"] },
+        "path": { "type": "string", "minLength": 1 },
+        "formato": { "enum": ["arquivo", "bloco-markdown", "bloco-toml", "entrada-json-mcp"] },
+        "conteudo_sha256": { "$ref": "#/$defs/sha256" }
+      }
+    }
+  }
+}

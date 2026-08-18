@@ -10,7 +10,9 @@ verificado_commit: <sha>
 
 # Aberto — conflitos e indefinições
 
-> Quando duas fontes divergem, **o agente não escolhe**. Registra aqui e para.
+> Quando duas fontes divergem, aplique a ordem objetiva de autoridade. Se fontes do
+> mesmo nível continuarem inconclusivas, registre `indeterminado` aqui e prossiga no que
+> não depender dessa resposta; só a ação afetada fica bloqueada.
 > Resolução é sempre **contra o código**, nunca contra a data mais recente — o
 > documento mais novo pode ser o mais errado.
 >

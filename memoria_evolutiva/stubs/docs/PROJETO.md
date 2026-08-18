@@ -51,8 +51,8 @@ vive no `ESTADO.md` e no histórico do versionador.
 |---|---|---|
 | **`docs/` neste repositório** | todo fato sobre o código | **canônica** |
 | <acervo secundário, se houver> | <assunto exclusivo> | canônica **só fora do código** |
-| <índice semântico, se houver — ver `padrao.json` → `memoria.ferramenta`> | busca por significado nos documentos | **zero. sempre derivado** |
-| <grafo de código, se houver — ver `padrao.json` → `grafo.ferramenta`> | estrutura do código: quem chama o quê, impacto de mudança | **zero. sempre derivado do código** |
+| Hindsight local — ver `padrao.json` → `memoria` | busca por significado nos documentos | **zero. sempre derivado** |
+| Graphify — ver `padrao.json` → `grafo` | estrutura do código: quem chama o quê, impacto de mudança | **zero. sempre derivado do código** |
 
 ### Ordem de desempate quando as fontes divergirem
 
@@ -62,17 +62,17 @@ vive no `ESTADO.md` e no histórico do versionador.
 3. docs/ com status: verificado
 4. docs/ com status: rascunho
 5. <acervo secundário>
-6. <índice semântico>
+6. Hindsight, apenas como ponteiro para as fontes acima
 ```
 
 **Duas regras que acompanham:**
 
 - **Resultado de busca semântica nunca é resposta final.** É ponteiro: suba até a fonte
   canônica pela origem declarada, e responda de lá.
-- **O grafo de código, se houver, responde "como funciona", nunca "por quê".** Ele mapeia
+- **O grafo de código responde "como funciona", nunca "por quê".** Ele mapeia
   o que o código É — inclusive quando o código está errado. O porquê mora em `docs/`.
-- **Divergência entre dois níveis não é resolvida por você.** Registre em `docs/ABERTO.md`
-  e pare. Você reporta, não escolhe.
+- **Divergência entre dois níveis segue a política autônoma.** Aplique a ordem de
+  autoridade, registre os dois lados e continue; sem desempate, use `indeterminado`.
 
 ### Direção do fluxo
 
@@ -187,8 +187,9 @@ direção invertida, ciclo, e documento `verificado` pendurado num pai já `supe
    entradas antigas — a cronologia é append-only.
 2. **Reescrever** `docs/ESTADO.md`. Ele não acumula; máximo uma página.
 3. **Registrar em** `docs/ABERTO.md` qualquer divergência que encontrou e não resolveu.
-4. <se houver índice: reindexar e rodar `vendor/bin/memoria indice --marcar`>
-5. **Rodar os validadores.**
+4. `memoria bancos sincronizar` e `memoria bancos status`
+5. **Rodar `memoria verificar` e `memoria autoteste`.** A verificação inclui a skill
+   derivada quando ela já foi gerada.
 6. **Não commitar** sem autorização explícita.
 
 > **Os itens 1–5 e o 6 se contradizem de propósito, e a saída é esta:** você grava os

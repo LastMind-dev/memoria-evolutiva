@@ -1,0 +1,143 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://lastmind.dev/memoria-evolutiva/schemas/corpus-avaliacao-rag-v1.schema.json",
+  "title": "Corpus versionado de avaliação do RAG",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "projeto", "casos"],
+  "properties": {
+    "schema": { "const": 1 },
+    "projeto": { "type": "string", "minLength": 1 },
+    "casos": {
+      "type": "array", "minItems": 3,
+      "items": { "$ref": "#/$defs/caso" }
+    }
+  },
+  "allOf": [
+    {
+      "properties": {
+        "casos": {
+          "contains": {
+            "type": "object",
+            "required": ["categoria", "espera_sem_fonte"],
+            "properties": {
+              "categoria": { "const": "engenharia" },
+              "espera_sem_fonte": { "const": false }
+            }
+          },
+          "minContains": 1
+        }
+      }
+    },
+    {
+      "properties": {
+        "casos": {
+          "contains": {
+            "type": "object",
+            "required": ["categoria", "espera_sem_fonte"],
+            "properties": {
+              "categoria": { "const": "automacao" },
+              "espera_sem_fonte": { "const": false }
+            }
+          },
+          "minContains": 1
+        }
+      }
+    },
+    {
+      "properties": {
+        "casos": {
+          "contains": {
+            "type": "object",
+            "required": ["categoria", "espera_sem_fonte"],
+            "properties": {
+              "categoria": { "const": "atendimento" },
+              "espera_sem_fonte": { "const": true }
+            }
+          },
+          "minContains": 1
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "textos": {
+      "type": "array", "uniqueItems": true,
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "identificador": {
+      "type": "string", "pattern": "^[a-z0-9][a-z0-9._-]{0,63}$"
+    },
+    "caso": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id", "categoria", "perfil", "pergunta", "resposta_esperada",
+        "fontes_esperadas", "fontes_proibidas", "termos_esperados", "espera_sem_fonte"
+      ],
+      "properties": {
+        "id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9._-]{0,63}$" },
+        "categoria": { "enum": ["engenharia", "atendimento", "automacao"] },
+        "perfil": {
+          "enum": [
+            "engenharia-leitura", "engenharia-documentacao", "automacao-codigo",
+            "atendimento", "operacao-assistida"
+          ]
+        },
+        "produto": { "$ref": "#/$defs/identificador" },
+        "tenant": { "$ref": "#/$defs/identificador" },
+        "pergunta": { "type": "string", "minLength": 1, "maxLength": 4000 },
+        "resposta_esperada": { "type": "string", "minLength": 1 },
+        "fontes_esperadas": { "$ref": "#/$defs/textos" },
+        "fontes_proibidas": { "$ref": "#/$defs/textos" },
+        "termos_esperados": { "$ref": "#/$defs/textos" },
+        "espera_sem_fonte": { "type": "boolean" }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "categoria": { "const": "engenharia" } } },
+          "then": {
+            "properties": {
+              "perfil": { "enum": ["engenharia-leitura", "engenharia-documentacao"] }
+            }
+          }
+        },
+        {
+          "if": { "properties": { "categoria": { "const": "automacao" } } },
+          "then": { "properties": { "perfil": { "const": "automacao-codigo" } } }
+        },
+        {
+          "if": { "properties": { "categoria": { "const": "atendimento" } } },
+          "then": {
+            "properties": {
+              "perfil": { "enum": ["atendimento", "operacao-assistida"] }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "perfil": { "enum": ["atendimento", "operacao-assistida"] }
+            }
+          },
+          "then": { "required": ["produto", "tenant"] }
+        },
+        {
+          "if": { "properties": { "espera_sem_fonte": { "const": true } } },
+          "then": {
+            "properties": {
+              "fontes_esperadas": { "maxItems": 0 },
+              "termos_esperados": { "maxItems": 0 }
+            }
+          },
+          "else": {
+            "properties": {
+              "fontes_esperadas": { "minItems": 1 },
+              "termos_esperados": { "minItems": 1 }
+            }
+          }
+        }
+      ]
+    }
+  }
+}

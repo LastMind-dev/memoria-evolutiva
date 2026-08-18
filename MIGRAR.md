@@ -6,8 +6,10 @@ do próprio repositório. Este guia foi **destilado de uma migração real** —
 apareceu lá.
 
 A regra que governa tudo: **a migração troca a ferramenta, nunca o conteúdo.** Os seus
-documentos, a sua baseline e o seu marcador de índice atravessam intactos. Se algum
-passo pedir para reescrever conteúdo, desconfie do passo.
+documentos e a sua baseline atravessam intactos. Marcadores de versões anteriores não
+são aceitos como prova da política de segurança v4: `memoria bancos sincronizar` cria a
+nova confirmação com redaction e fingerprint. Se algum passo pedir para reescrever
+conteúdo canônico sem arquivá-lo, desconfie do passo.
 
 ---
 
@@ -21,9 +23,7 @@ git add -A && git commit -m "foto de entrada: pré-migração"
 ## 1. Instale o pacote
 
 ```bash
-pipx install memoria-evolutiva
-# enquanto não estiver no PyPI:
-pipx install git+https://github.com/LastMind-dev/memoria-evolutiva.git
+pipx install git+https://github.com/LastMind-dev/memoria-evolutiva.git@main
 ```
 
 Não rode `memoria instalar` ainda — primeiro o `padrao.json`, senão o instalador escreve
@@ -77,7 +77,7 @@ Depois: `memoria gerar` e **commite** — o envelope dos arquivos muda uma vez
 ## 5. Rode o instalador — e reconcilie o que ele publica
 
 ```bash
-memoria instalar --projeto="<o-mesmo-do-padrao.json>" --codigo=<pasta> --indice=<ferramenta>
+memoria instalar --projeto="<o-mesmo-do-padrao.json>" --codigo=<pasta> --adiar-bancos
 ```
 
 Ele nunca sobrescreve; mas **publica coisas que o seu projeto v1 talvez já tenha com
@@ -133,7 +133,7 @@ alterou (runbook, gerados) e os que ela criou. **Isso é o sistema funcionando.*
    proveniência).
 2. Se você alinhar o núcleo à recomendação do `RAG.md` (tirar `docs/gerado/` — derivado
    não se indexa), **purgue os registros de gerado** do índice.
-3. Só então: `memoria indice --marcar`.
+3. Só então: `memoria bancos sincronizar` (o marcador nasce após leitura confirmada).
 
 Marcar sem indexar transforma a verificação em teatro.
 
@@ -161,7 +161,7 @@ ela respondeu 8 de 8 perguntas e ainda achou o que este guia agora manda varrer.
 - [ ] `grep -rn "php scripts/" docs/ *.md` → zero fora de `_arquivo`
 - [ ] scripts v1 arquivados; os só-seus ficam
 - [ ] CI trocado
-- [ ] índice: reindexar de verdade → purgar gerado → `--marcar`
+- [ ] bancos: sincronizar Hindsight+Graphify → `memoria bancos status`
 - [ ] `verificar` + `autoteste` verdes · cronologia + ESTADO · leitura fria
 
 
@@ -175,7 +175,7 @@ compatíveis** (paridade byte a byte, provada na árvore de referência — mesm
 catraca, marcador lido verde nos dois sentidos).
 
 ```bash
-pipx install memoria-evolutiva
+pipx install git+https://github.com/LastMind-dev/memoria-evolutiva.git@main
 memoria validar          # deve reprovar SÓ os derivados — ver abaixo
 memoria gerar            # a linha "> Gerado por ..." muda de motor; regere UMA vez
 memoria verificar        # verde

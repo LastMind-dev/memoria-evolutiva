@@ -27,9 +27,9 @@ ancoras: []
 5. Rode as verificações antes de tocar em qualquer coisa:
 
    ```
-   vendor/bin/memoria validar
-   vendor/bin/memoria catraca
-   vendor/bin/memoria indice
+   memoria validar
+   memoria catraca
+   memoria bancos status
    ```
 
    Se alguma já falha **antes** de você mexer, isso é o achado da sessão: registre e
@@ -43,9 +43,9 @@ pista disponível, não a fonte. A ordem de desempate está no `PROJETO.md`.
 
 ## Durante — quatro reflexos
 
-**Divergiu? não escolha.** Documento diz A, código faz B: abra entrada em
-`docs/ABERTO.md`, cite os dois lados com caminho de arquivo, e siga. Escolher em
-silêncio é como uma divergência vira um mês de retrabalho.
+**Divergiu? aplique a política autônoma.** Siga a ordem de autoridade em
+`docs/politicas/AUTONOMIA.md`, atualize a fonte inferior e registre os dois lados com
+âncoras. Se a evidência não desempatar, use `indeterminado` e continue.
 
 **Explicou a mesma coisa duas vezes? vira documento.** A segunda explicação é o sinal.
 Copie o molde certo de `docs/_templates/` e escreva enquanto o assunto está fresco.
@@ -77,7 +77,7 @@ Se existir e estiver desatualizado, atualize agora. Não em seguida, não amanh�
 ### 2. Regerar os derivados
 
 ```
-vendor/bin/memoria gerar
+memoria gerar
 ```
 
 Se a saída mudou, é porque o código mudou. Commite junto — derivado que fica para trás
@@ -112,29 +112,27 @@ página. O que sobrar vai para a cronologia.
 Resolveu algo que estava lá? Marque `✅ resolvido em <data>` e diga **como**. Não apague.
 Descobriu algo que não dá para resolver hoje? Abra a entrada agora, com evidência.
 
-### 6. Reindexar, se o projeto tem índice
+### 6. Sincronizar os dois bancos derivados
 
-Documento do núcleo que mudou precisa ser reindexado — com origem e versão em cada
-registro. O procedimento deste projeto está em `docs/runbooks/indexacao.md`.
-
-**Só depois de indexar de verdade:**
+Documento ou código alterado invalida respectivamente Hindsight ou Graphify. O comando
+único sincroniza os dois e só grava marcador depois da confirmação real:
 
 ```
-vendor/bin/memoria indice --marcar
+memoria bancos sincronizar
 ```
 
-Marcar sem indexar transforma a verificação em teatro, e teatro é pior que nada: dá
-confiança falsa.
+Não existe marcação manual.
 
-### 7. Rodar tudo de novo
+### 7. Relê, documentar e validar tudo de novo
 
 ```
-vendor/bin/memoria validar
-vendor/bin/memoria catraca
-vendor/bin/memoria indice
+memoria documentar
+memoria verificar
+memoria autoteste
 ```
 
-As três precisam passar.
+Os três precisam passar. `memoria verificar` inclui estrutura, catraca, bancos, avaliação
+RAG por perfil e a integridade da skill já gerada.
 
 ### 8. Commitar
 
@@ -156,13 +154,14 @@ Skill, comando, prompt salvo, regra de editor — cada ferramenta chama de um je
 para qualquer uma a mesma regra: **este arquivo é a fonte; a peça é derivada.**
 
 ```bash
-vendor/bin/memoria skill              # monta o pacote a partir deste runbook e do kit
-vendor/bin/memoria skill --conferir   # a peça instalada ainda bate com este arquivo?
+memoria skill              # monta o pacote a partir deste runbook e do kit
+memoria skill --conferir   # a peça instalada ainda bate com este arquivo?
 ```
 
-O `--conferir` avisa quando este runbook mudou depois da última geração. É **aviso, não
-erro**: peça velha não quebra o produto, só faz o agente seguir um procedimento que o
-projeto já mudou. Vale rodar junto com as verificações do passo 7.
+O `--conferir` é **falha dura** quando runbook, versão do gerador ou artefato publicado
+diverge. Uma peça velha ensina o agente a operar por um contrato abandonado e, por isso,
+não pode passar no mesmo gate que declara a memória portátil. Rode junto com as
+verificações do passo 7.
 
 Escrever o procedimento dentro da ferramenta e deixar este documento para trás recria
 exatamente o problema que o método existe para resolver — só que agora dentro da peça que

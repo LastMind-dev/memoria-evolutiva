@@ -2,10 +2,10 @@
     "_leia": "Configuração do Método da Memória Evolutiva. Este é o ÚNICO arquivo que você edita para adaptar o padrão ao seu projeto — os scripts em scripts/ não devem ser modificados. Se precisar mudar um script, provavelmente falta uma opção aqui: abra uma entrada em docs/ABERTO.md em vez de editar.",
     "projeto": "meu-projeto",
     "acervos": {
-        "_leia": "Onde cada tipo de fato mora. `canonico` é obrigatório. Os outros dois são opcionais — deixe null se não usar. Nunca declare dois acervos com a mesma jurisdição.",
+        "_leia": "`docs/` é a autoridade documental. Hindsight e Graphify são cópias derivadas obrigatórias por padrão e nunca ganham jurisdição sobre fatos.",
         "canonico": "docs",
         "exploracao": null,
-        "indice": null,
+        "indice": "externo",
         "_leia_ignorar": "Pastas dentro do acervo canônico que o validador NÃO olha. `_templates` tem placeholders que não são caminhos reais. `_arquivo` é para documento cujo ASSUNTO deixou de existir — módulo removido, integração desligada — e que você guarda por histórico. ATENÇÃO: decisão superada NÃO vai para cá. Ela fica onde está, com `status: superado`, porque é assim que a verificação de cadeia continua enxergando quem dependia dela. Mover para `_arquivo` é tirar o documento da verificação — e é exatamente o que você não quer fazer com uma decisão que caiu.",
         "ignorar": [
             "docs/_templates/",
@@ -84,7 +84,10 @@
         ],
         "extratores": [
             "mapa-diretorios",
-            "cadeia-documentos"
+            "cadeia-documentos",
+            "diagnostico-projeto",
+            "analise-inicial",
+            "cobertura-codigo"
         ],
         "_leia_extensao": "EXECUTÁVEL do projeto (qualquer linguagem: .py, .php, .sh, .js) que imprime JSON no stdout: [{\"nome\",\"id\",\"titulo\",\"corpo\"}]. É assim que o projeto acrescenta geradores — tabelas, rotas, comandos — sem tocar no pacote. Nome repetido sobrescreve o extrator embutido. Declare cada nome também em `extratores`. Exemplo pronto: exemplos/extratores-projeto.py no repositório do pacote.",
         "extensao_do_projeto": null
@@ -102,11 +105,19 @@
         ]
     },
     "memoria": {
-        "_leia": "Índice semântico. Deixe `ativo` como false se o projeto não tem RAG — o resto do padrão funciona sem. O núcleo falha duro; o que está fora é medido e não bloqueia.",
-        "ativo": false,
-        "_leia_ferramenta": "Qual ferramenta serve este índice: \"hindsight\", \"pgvector\", \"qdrant\", ou o que você usar. Os validadores NUNCA falam com a ferramenta — só comparam o marcador com os documentos — então trocar de ferramenta não muda validador nenhum: muda este campo, o anexo que você segue (RAG-<FERRAMENTA>.md) e o procedimento em docs/runbooks/indexacao.md. É o que torna a troca barata.",
-        "ferramenta": null,
-        "marcador": "docs/.indexado.json",
+        "_leia": "Hindsight local obrigatório. `memoria documentar` substitui a cópia do núcleo e só grava o marcador após confirmação real do servidor.",
+        "ativo": true,
+        "obrigatorio": true,
+        "ferramenta": "hindsight",
+        "modo": "local",
+        "endpoint": "http://127.0.0.1:8888",
+        "banco": "meu-projeto",
+        "api_key_env": null,
+        "timeout_segundos": 300,
+        "assincrono_acima_de_bytes": 1000000,
+        "intervalo_poll_segundos": 1,
+        "confirmacoes_paralelas": 8,
+        "marcador": "docs/.hindsight-indexado.json",
         "nucleo": [
             "docs/PROJETO.md",
             "docs/ESTADO.md",
@@ -119,19 +130,108 @@
             "docs/decisoes/",
             "docs/politicas/",
             "docs/runbooks/",
-            "docs/evidencia/",
-            "docs/gerado/"
+            "docs/evidencia/"
         ],
         "ignorar": [
             "docs/_arquivo/",
             "docs/_templates/"
         ]
     },
+    "rag": {
+        "_leia": "Corpus determinístico por fragmentos. Na Fase 1 roda em modo sombra e não substitui nem migra os documentos inteiros do Hindsight.",
+        "modo": "sombra",
+        "manifesto": "docs/gerado/manifesto-fragmentos-v2.json",
+        "algoritmo": "markdown-secoes-v2-acl",
+        "max_palavras": 450,
+        "min_palavras": 25,
+        "embedding_provedor": "local",
+        "embedding_modelo": "BAAI/bge-small-en-v1.5"
+    },
+    "contexto": {
+        "_leia": "Gateway read-only independente de LLM. CLI, MCP e HTTP devolvem o mesmo envelope; perfil controla visibilidade, nunca concede mutação.",
+        "max_tokens": 2048,
+        "max_fontes": 8,
+        "max_codigo": 5,
+        "http_host": "127.0.0.1",
+        "http_porta": 8765
+    },
+    "seguranca_memoria": {
+        "_leia": "Fase 4 obrigatória: documento secreto não entra no corpus, atendimento exige produto+tenant exatos e toda retenção no Hindsight recebe redaction determinística.",
+        "ativo": true,
+        "classificacao_padrao": "interno",
+        "nao_indexar": [
+            "secreto-nao-indexar"
+        ],
+        "escopo": "produto-tenant-exato-v1",
+        "perfis_com_escopo_obrigatorio": [
+            "atendimento",
+            "operacao-assistida"
+        ],
+        "redaction_antes_retain": true,
+        "redaction_algoritmo": "redaction-deterministica-v1"
+    },
+    "adaptadores": {
+        "_leia": "Entradas derivadas para agentes. O manifesto e os arquivos por cliente nunca armazenam fatos; apenas apontam para o gateway e para docs/.",
+        "manifesto": "docs/gerado/manifesto-adaptadores-v1.json",
+        "perfil_canary": "engenharia-leitura",
+        "plataformas": [
+            "codex",
+            "claude",
+            "cursor",
+            "windsurf",
+            "hermes"
+        ]
+    },
+    "executor": {
+        "_leia": "Executor não interativo da Fase 5. Cada run usa branch/worktree própria, estado local ignorado pelo Git e capacidades negadas por padrão. Não faz commit, push nem publicação.",
+        "ativo": true,
+        "estado": ".memoria/executor",
+        "isolamento": "git-worktree-branch-v1",
+        "timeout_global_segundos": 900,
+        "max_tentativas": 3,
+        "backoff_segundos": 1,
+        "lock_expira_segundos": 1200,
+        "capacidades_permitidas": [],
+        "mutacao_externa_padrao": "negada",
+        "publicacao_automatica": false
+    },
+    "avaliacao": {
+        "_leia": "Fase 6: corpus versionado, métricas por perfil e catraca de drift. Relatório e manifesto são derivados; baseline só muda por `memoria avaliar medir`.",
+        "ativo": true,
+        "corpus": "docs/avaliacao/casos-rag-v1.json",
+        "baseline": "docs/politicas/baseline-rag-v1.json",
+        "relatorio": "docs/gerado/relatorio-avaliacao-rag-v1.json",
+        "manifesto": "docs/gerado/manifesto-avaliacao-rag-v1.json",
+        "min_hit_1": 0.5,
+        "min_hit_3": 1.0,
+        "min_cobertura_citacao": 1.0,
+        "min_cobertura_resposta": 1.0,
+        "max_sem_fonte": 0.0,
+        "min_negativos_ok": 1.0,
+        "regressao_maxima": 0.0,
+        "min_usos_promocao": 2
+    },
     "grafo": {
-        "_leia": "Grafo de código: code-review-graph, Graphify ou similar. Responde ESTRUTURA — quem chama o quê, impacto de mudança — enquanto o índice semântico responde SIGNIFICADO nos documentos. São perguntas diferentes; use um, os dois ou nenhum. Autoridade zero, sempre derivado do código, reconstruível com um comando. O método não o verifica: essas ferramentas se atualizam sozinhas ou têm o próprio watch. Declarar aqui serve para o agente saber que existe e usá-lo em vez de reler o repositório.",
-        "ativo": false,
-        "ferramenta": null,
-        "comando_de_build": null
+        "_leia": "Graphify local obrigatório. Responde estrutura e impacto no código; é derivado, reconstruível, tem autoridade zero e é bloqueado quando sua assinatura fica velha.",
+        "ativo": true,
+        "obrigatorio": true,
+        "ferramenta": "graphify",
+        "modo": "local",
+        "comando": [
+            "graphify"
+        ],
+        "arquivo": "graphify-out/graph.json",
+        "marcador": ".memoria/bancos/graphify.json",
+        "cobertura_minima": 0.8,
+        "reducao_maxima_percentual": 50,
+        "timeout_segundos": 900
+    },
+    "autonomia": {
+        "_leia": "A IA decide pela política versionada, promove fatos com evidência e registra ausência de prova como indeterminado. Revisão humana não é catraca documental; autorizações operacionais continuam separadas.",
+        "ativo": true,
+        "revisao_humana_obrigatoria": false,
+        "sem_evidencia": "indeterminado",
+        "politica": "docs/politicas/AUTONOMIA.md"
     },
     "_exemplos_de_contador": [
         {

@@ -2,7 +2,8 @@
 
 Esta pasta guarda a primeira implementação do padrão, em PHP, **congelada em
 2026-08-05**. O motor mantido é o pacote Python na raiz do repositório
-(`memoria_evolutiva/`), instalável via `pipx install memoria-evolutiva`.
+(`memoria_evolutiva/`), instalável via
+`pipx install git+https://github.com/LastMind-dev/memoria-evolutiva.git@main`.
 
 ## Por que foi aposentado
 
@@ -25,7 +26,7 @@ eterna.
 correções e regras novas entram **só no motor Python**. Para trocar:
 
 ```bash
-pipx install memoria-evolutiva
+pipx install git+https://github.com/LastMind-dev/memoria-evolutiva.git@main
 memoria gerar        # regere os derivados UMA vez: a linha "Gerado por" muda de motor
 memoria verificar
 ```

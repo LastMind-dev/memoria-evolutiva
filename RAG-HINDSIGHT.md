@@ -8,6 +8,21 @@ fora e escreva outro; o `RAG.md` continua valendo inteiro. É essa separação q
 método sobreviver à troca — e é por isso que o específico mora num anexo e não no corpo
 do guia.
 
+Na versão 6.0, o manifesto fragmentado v2 continua em **modo sombra**, agora coberto por
+corpus, baseline e catraca de recuperação versionados.
+O sincronizador continua enviando documentos inteiros ao Hindsight e gera/verifica o
+manifesto em paralelo. A migração para um retain por fragmento só será liberada depois
+da comparação de recuperação; portanto, atualizar não apaga nem converte o bank atual.
+
+Antes do retain, `secreto-nao-indexar` é excluído e o restante passa por redaction
+determinística. O texto confirmado no provedor inclui o fingerprint da política.
+Perguntas de atendimento/operação não são enviadas ao recall do Hindsight; esses perfis
+usam somente o manifesto local com produto+tenant exatos.
+
+O gateway `memoria contexto` usa o recall apenas como sinal de ranking. Todo trecho
+documental devolvido vem do manifesto local verificado e é relido de `docs/`; resultado
+sem `source_uri` reconhecível é descartado.
+
 ---
 
 ## Mapa dos conceitos
@@ -115,7 +130,7 @@ A sequência, na ordem — e a ordem importa:
 ```
 1. delete_document(document_id: "docs/funcional/FDD-0003.md")
 2. retain(...) uma vez por seção, com o commit NOVO
-3. memoria indice --marcar
+3. memoria bancos sincronizar
 ```
 
 Apagar antes de gravar evita o erro mais comum e mais silencioso desta ferramenta:
@@ -165,6 +180,10 @@ usuário prefere respostas curtas" é memória de assistente; "a conciliação r
 fato de projeto e mora em `docs/`. Misturar os dois faz o `recall` devolver preferência
 pessoal quando alguém pergunta sobre o sistema.
 
+**Não envie a conversa do cliente ao recall do bank do projeto.** Atendimento e operação
+usam recuperação local filtrada; identidade de produto/tenant vem do sistema autenticado,
+nunca do texto escrito pelo cliente ou da inferência da LLM.
+
 **Não deixe `retain` automático gravar decisão de arquitetura.** Decisão vira ADR em
 `docs/decisoes/`, e o ADR é que vai para o índice — nunca o contrário. Decisão que só
 existe no bank é decisão que some quando você trocar de ferramenta, e é exatamente o
@@ -179,9 +198,9 @@ abertura   recall com tags:["projeto:<nome>"] para o contexto acumulado
            → e sempre subir até docs/ antes de afirmar qualquer coisa
 
 fecho      documento do núcleo mudou?
-             delete_document → retain por seção → validar-indice.php --marcar
+             retain com document_id estável e replace → leitura de confirmação
            documento virou superado?
              delete_document, e reindexe com status:superado (não purgue — é a resposta
              para "por que mudamos", que alguém procura seis meses depois)
-           memoria indice  → tem que ficar verde
+           memoria bancos status  → Hindsight e Graphify têm que ficar verdes
 ```

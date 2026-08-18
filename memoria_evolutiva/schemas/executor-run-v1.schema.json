@@ -1,0 +1,144 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://lastmind.dev/memoria-evolutiva/schemas/executor-run-v1.schema.json",
+  "title": "Resultado não interativo do executor idempotente",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema", "ok", "run_id", "status", "exit_code", "erro", "publicado",
+    "commit_criado", "mutacoes_externas"
+  ],
+  "properties": {
+    "schema": { "const": 1 },
+    "ok": { "type": "boolean" },
+    "motor_versao": { "type": "string", "minLength": 1 },
+    "projeto": { "type": "string", "minLength": 1 },
+    "run_id": {
+      "type": ["string", "null"],
+      "pattern": "^[a-z0-9][a-z0-9._-]{0,63}$"
+    },
+    "acao": { "enum": ["documentar", "verificar"] },
+    "capacidades_solicitadas": {
+      "type": "array", "uniqueItems": true,
+      "items": { "const": "sincronizar-bancos" }
+    },
+    "base_commit": { "$ref": "#/$defs/sha1" },
+    "branch": {
+      "type": ["string", "null"], "pattern": "^memoria/run-"
+    },
+    "worktree": { "type": "string", "minLength": 1 },
+    "isolamento": { "enum": ["git-worktree-branch-v1", "raiz-somente-leitura"] },
+    "plano": {
+      "type": "array", "minItems": 1, "uniqueItems": true,
+      "items": { "$ref": "#/$defs/etapa_nome" }
+    },
+    "status": {
+      "enum": ["pendente", "executando", "interrompido", "falhou", "concluido", "recusado"]
+    },
+    "exit_code": { "type": ["integer", "null"], "minimum": 0, "maximum": 255 },
+    "checkpoint_atual": {
+      "anyOf": [{ "$ref": "#/$defs/etapa_nome" }, { "type": "null" }]
+    },
+    "checkpoints": {
+      "type": "object",
+      "propertyNames": { "$ref": "#/$defs/etapa_nome" },
+      "additionalProperties": { "$ref": "#/$defs/checkpoint" }
+    },
+    "diff": {
+      "anyOf": [{ "$ref": "#/$defs/diff" }, { "type": "null" }]
+    },
+    "erro": { "type": ["string", "null"] },
+    "falhas": { "type": "object" },
+    "criado_em": { "type": "string", "format": "date-time" },
+    "atualizado_em": { "type": "string", "format": "date-time" },
+    "replay": { "type": "boolean" },
+    "publicado": { "const": false },
+    "commit_criado": { "const": false },
+    "mutacoes_externas": {
+      "type": "array", "uniqueItems": true,
+      "items": { "const": "sincronizar-bancos" }
+    }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "ok": { "const": true } }, "required": ["ok"] },
+      "then": {
+        "required": [
+          "motor_versao", "projeto", "acao", "capacidades_solicitadas", "base_commit",
+          "branch", "worktree", "isolamento", "plano", "checkpoint_atual", "checkpoints", "diff",
+          "criado_em", "atualizado_em", "replay"
+        ],
+        "properties": {
+          "status": { "const": "concluido" },
+          "exit_code": { "const": 0 },
+          "run_id": { "type": "string" }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": { "acao": { "const": "documentar" } },
+        "required": ["acao"]
+      },
+      "then": {
+        "properties": {
+          "branch": { "type": "string", "pattern": "^memoria/run-" },
+          "isolamento": { "const": "git-worktree-branch-v1" }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": { "acao": { "const": "verificar" } },
+        "required": ["acao"]
+      },
+      "then": {
+        "properties": {
+          "branch": { "type": "null" },
+          "isolamento": { "const": "raiz-somente-leitura" },
+          "capacidades_solicitadas": { "maxItems": 0 },
+          "diff": { "type": "null" }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "sha1": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+    "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "etapa_nome": {
+      "enum": [
+        "preparar-worktree", "executar-acao", "validar", "registrar-diff",
+        "sincronizar-bancos", "avaliar-pos-sincronizacao", "registrar-diff-final"
+      ]
+    },
+    "checkpoint": {
+      "type": "object",
+      "required": ["concluido_em", "exit_code"],
+      "properties": {
+        "concluido_em": { "type": "string", "format": "date-time" },
+        "reutilizado": { "type": "boolean" },
+        "tentativas": { "type": "integer", "minimum": 0 },
+        "exit_code": { "type": ["integer", "null"] },
+        "duracao_ms": { "type": "integer", "minimum": 0 },
+        "stdout_sha256": { "$ref": "#/$defs/sha256" },
+        "stderr_sha256": { "$ref": "#/$defs/sha256" },
+        "resumo": { "type": "string" },
+        "patch": { "type": "string" },
+        "patch_sha256": { "$ref": "#/$defs/sha256" },
+        "bytes": { "type": "integer", "minimum": 0 },
+        "arquivos": { "type": "array", "items": { "type": "string" } }
+      },
+      "additionalProperties": false
+    },
+    "diff": {
+      "type": "object", "additionalProperties": false,
+      "required": ["patch", "patch_sha256", "bytes", "arquivos"],
+      "properties": {
+        "patch": { "type": "string", "minLength": 1 },
+        "patch_sha256": { "$ref": "#/$defs/sha256" },
+        "bytes": { "type": "integer", "minimum": 0 },
+        "arquivos": { "type": "array", "uniqueItems": true, "items": { "type": "string" } }
+      }
+    }
+  }
+}

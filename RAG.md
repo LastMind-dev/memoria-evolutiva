@@ -4,12 +4,23 @@ Material de referência do método, como o `METODO.md`. **Não copie para dentro
 projeto** — o que vai para o projeto é o `docs/runbooks/indexacao.md`, que o kit traz
 pronto para preencher.
 
-Vale para qualquer ferramenta: Hindsight, pgvector, Qdrant, Weaviate, Chroma, ou o que
-vier depois. **A escolha é declarada em `padrao.json` → `memoria.ferramenta`** — os
-validadores nunca falam com a ferramenta, então trocar é trocar o campo, o anexo e o
-runbook, nada mais. Há um anexo com a tradução para o Hindsight em `RAG-HINDSIGHT.md`;
-para outra ferramenta, escreva o anexo equivalente e jogue fora o que não usar — anexo
-é descartável por desenho.
+> **Implementado na versão 3.4:** `memoria fragmentos gerar` produz
+> `docs/gerado/manifesto-fragmentos-v2.json` com IDs, ACL, âncoras, SHA-256 e fingerprint
+> determinísticos. O corpus roda em modo sombra ao lado dos documentos inteiros atuais;
+> nenhuma migração do Hindsight acontece nesta fase.
+>
+> `memoria contexto --pergunta=... --perfil=... --json` combina busca literal,
+> semântica e estrutural, relê cada fonte e aplica um orçamento determinístico.
+>
+> **Implementado na versão 6.0:** `memoria avaliar` usa corpus e baseline versionados
+> para bloquear regressão de hit@1, hit@3, citações, cobertura da resposta e ausência
+> de fonte. O relatório registra drift por algoritmo, modelo e perfil.
+
+Os princípios valem para qualquer ferramenta. A implementação padrão fixa Hindsight
+local para documentos e Graphify para código. Uma futura troca por pgvector, Qdrant,
+Weaviate ou Chroma exige um adaptador com o mesmo contrato de gravação, leitura de
+confirmação e frescor — mudar apenas um nome no JSON não basta. O anexo detalhado está
+em `RAG-HINDSIGHT.md`.
 
 ---
 
@@ -117,9 +128,10 @@ Três regras que evitam os erros comuns:
 começa em "…exige autorização explícita a cada ação" sem dizer de onde veio é um trecho
 que a busca devolve e ninguém sabe interpretar.
 
-**Seção maior que ~1500 palavras vira dois registros, cortando em `###`.** Seção menor que
-~50 palavras junta-se à vizinha. Trecho minúsculo casa com quase tudo e polui todo
-resultado.
+**Seção maior que o alvo de `rag.max_palavras` vira mais de um registro, preservando
+blocos atômicos.** O padrão é 450 palavras; `rag.min_palavras` começa em 25 e permite
+juntar uma cauda curta à parte anterior. Trecho minúsculo casa com quase tudo e polui
+todo resultado.
 
 **Nunca corte no meio de uma tabela ou de um bloco de código.** Meia tabela é pior que
 nenhuma: parece completa.
@@ -238,27 +250,28 @@ alguém procura seis meses depois.
 **Documento que saiu do acervo é purgado**, sem reindexar. Não existe mais fonte para
 apontar, e registro sem fonte é registro que não pode ser verificado.
 
-### Por que o CI não reindexa
+### Por que o CI verifica, mas não sincroniza
 
-Porque o índice quase sempre é alcançado por ferramenta que roda na máquina de quem
-trabalha, não no runner. O `validar-indice.php` **não reindexa** — ele torna visível que
-precisa, e falha até alguém fazer.
+Na versão 3, `memoria bancos sincronizar` fala com o Hindsight local, lê o documento de
+volta e só então grava o marcador. `memoria indice` apenas verifica a cópia documental;
+marcação manual foi removida porque não provava persistência. O CI compara os marcadores
+versionados com as fontes, sem acessar o serviço local; a sessão sincroniza.
 
 É a mesma filosofia da catraca: a ferramenta não conserta, mas impede que o problema
 cresça sem ninguém ver.
 
 ### O marcador
 
-`docs/.indexado.json` guarda o hash de cada documento do núcleo na última indexação. O
+`docs/.hindsight-indexado.json` guarda o hash de cada documento do núcleo na última
+sincronização confirmada. O
 verificador compara com o estado atual e aponta o que mudou, o que é novo e o que sumiu.
 
 **O hash ignora `verificado_em`, `verificado_commit` e a linha de carimbo do gerador** —
 esses mudam a cada commit sem que o fato mude, e sem essa normalização o índice estaria
 permanentemente "defasado" por causa de um carimbo.
 
-> `--marcar` grava "isto está indexado". **Rode depois de indexar de verdade, nunca
-> antes.** Marcar sem indexar transforma a verificação em teatro — e teatro é pior que
-> nada, porque dá confiança falsa.
+> Marcador manual foi removido. `memoria bancos sincronizar` grava o estado somente após
+> reler o documento persistido no Hindsight.
 
 ---
 
@@ -407,12 +420,12 @@ certa entre os três primeiros resultados. Abaixo de dois terços, alguma coisa 
 **Os sinais qualitativos**, que valem junto com o número e não no lugar dele:
 
 - alguém encontra por significado algo que não saberia procurar por palavra exata;
-- o `validar-indice.php` fica verde sem esforço heroico no fim da sessão.
+- o `memoria indice` fica verde sem esforço heroico no fim da sessão.
 
 E o sinal de que **não** vale: se você só consulta o índice para achar arquivo que já
 sabe o nome, `grep` faz isso melhor, mais rápido e sem defasagem. Desligue com
-`memoria.ativo: false` — o resto do método funciona inteiro sem índice nenhum, e um
-índice desligado é melhor que um índice mentindo.
+`memoria instalar --sem-bancos` — o restante do método continua funcional, mas o modo
+padrão exige Hindsight e Graphify; um opt-out explícito é melhor que um banco mentindo.
 
 ---
 

@@ -1,0 +1,111 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://lastmind.dev/memoria-evolutiva/schemas/manifesto-fragmentos-v2.schema.json",
+  "title": "Manifesto determinístico de fragmentos com ACL",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema", "projeto", "algoritmo", "perfil_fingerprint", "perfil_indice",
+    "documentos", "fragmentos", "assinatura"
+  ],
+  "properties": {
+    "schema": { "const": 2 },
+    "projeto": { "type": "string", "minLength": 1 },
+    "algoritmo": { "const": "markdown-secoes-v2-acl" },
+    "perfil_fingerprint": { "$ref": "#/$defs/sha256" },
+    "perfil_indice": {
+      "type": "object", "additionalProperties": false,
+      "required": ["max_palavras", "min_palavras", "especiais", "hindsight", "seguranca"],
+      "properties": {
+        "max_palavras": { "type": "integer", "minimum": 1 },
+        "min_palavras": { "type": "integer", "minimum": 0 },
+        "especiais": { "type": "object" },
+        "hindsight": {
+          "type": "object", "additionalProperties": false,
+          "required": ["modo", "contrato", "embedding_provedor", "embedding_modelo"],
+          "properties": {
+            "modo": { "const": "sombra" },
+            "contrato": { "const": 2 },
+            "embedding_provedor": { "type": "string", "minLength": 1 },
+            "embedding_modelo": { "type": "string", "minLength": 1 }
+          }
+        },
+        "seguranca": {
+          "type": "object", "additionalProperties": false,
+          "required": ["politica_fingerprint", "classificacoes", "redaction_antes_retain", "escopo"],
+          "properties": {
+            "politica_fingerprint": { "$ref": "#/$defs/sha256" },
+            "classificacoes": {
+              "const": ["publico", "interno", "restrito", "secreto-nao-indexar"]
+            },
+            "redaction_antes_retain": { "const": true },
+            "escopo": { "const": "produto-tenant-exato-v1" }
+          }
+        }
+      }
+    },
+    "documentos": {
+      "type": "object",
+      "additionalProperties": { "$ref": "#/$defs/documento" }
+    },
+    "fragmentos": { "type": "array", "items": { "$ref": "#/$defs/fragmento" } },
+    "assinatura": { "$ref": "#/$defs/sha256" }
+  },
+  "$defs": {
+    "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "perfis": {
+      "type": "array", "uniqueItems": true,
+      "items": {
+        "enum": [
+          "atendimento", "automacao-codigo", "engenharia-documentacao",
+          "engenharia-leitura", "operacao-assistida"
+        ]
+      }
+    },
+    "escopos": {
+      "type": "array", "uniqueItems": true,
+      "items": { "type": "string", "pattern": "^[a-z0-9][a-z0-9._-]{0,63}$" }
+    },
+    "documento": {
+      "type": "object", "additionalProperties": false,
+      "required": [
+        "doc_id", "doc_tipo", "doc_status", "source_sha256", "fragmentos",
+        "classificacao", "audience", "produtos", "tenants"
+      ],
+      "properties": {
+        "doc_id": { "type": "string", "minLength": 1 },
+        "doc_tipo": { "type": "string", "minLength": 1 },
+        "doc_status": { "type": "string", "minLength": 1 },
+        "source_sha256": { "$ref": "#/$defs/sha256" },
+        "fragmentos": { "type": "integer", "minimum": 1 },
+        "classificacao": { "enum": ["publico", "interno", "restrito"] },
+        "audience": { "$ref": "#/$defs/perfis" },
+        "produtos": { "$ref": "#/$defs/escopos" },
+        "tenants": { "$ref": "#/$defs/escopos" }
+      }
+    },
+    "fragmento": {
+      "type": "object", "additionalProperties": false,
+      "required": [
+        "fragment_id", "source_uri", "source_sha256", "conteudo_sha256", "doc_id",
+        "doc_tipo", "doc_status", "ordem", "classificacao", "audience",
+        "produtos", "tenants", "texto"
+      ],
+      "properties": {
+        "fragment_id": { "type": "string", "minLength": 1 },
+        "source_uri": { "type": "string", "pattern": "^docs/" },
+        "source_sha256": { "$ref": "#/$defs/sha256" },
+        "conteudo_sha256": { "$ref": "#/$defs/sha256" },
+        "doc_id": { "type": "string", "minLength": 1 },
+        "doc_tipo": { "type": "string", "minLength": 1 },
+        "doc_status": { "type": "string", "minLength": 1 },
+        "ordem": { "type": "integer", "minimum": 0 },
+        "classificacao": { "enum": ["publico", "interno", "restrito"] },
+        "audience": { "$ref": "#/$defs/perfis" },
+        "produtos": { "$ref": "#/$defs/escopos" },
+        "tenants": { "$ref": "#/$defs/escopos" },
+        "texto": { "type": "string", "minLength": 1 }
+      }
+    }
+  }
+}

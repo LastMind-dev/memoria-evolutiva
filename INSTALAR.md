@@ -1,4 +1,4 @@
-# Instalar — 20 minutos até o primeiro build verde
+# Instalar — um comando até o primeiro build verde
 
 Este é o caminho prático. O **porquê** de cada peça está no `METODO.md`; leia depois,
 ou quando alguma decisão da Parte IV parecer arbitrária.
@@ -18,22 +18,20 @@ manter a história do projeto de forma que qualquer modelo de linguagem — hoje
 a dois anos, em qualquer ferramenta — consiga abrir o repositório e saber onde o
 projeto está sem que ninguém precise explicar.
 
-Não depende de nenhum fornecedor. São arquivos markdown no seu repositório, mais um
-pacote Python de validadores sem dependência além da biblioteca padrão. Se todas as
+O acervo canônico não depende de fornecedor. São arquivos markdown no seu repositório,
+mais um pacote Python de validadores sem dependência além da biblioteca padrão. Se todas as
 ferramentas de IA que você usa hoje desaparecerem, a memória continua lá.
 
 ---
 
 ## 0. Antes de copiar nada
 
-**Se o projeto já existe, audite antes de criar.** É o erro que mais custa: gente que
-instala a estrutura por cima de um projeto que já tem documentação e acaba com duas —
-a antiga que ninguém apaga e a nova que ninguém preenche.
+Em projeto existente, o instalador inventaria o acervo atual antes de escrever e preserva
+arquivos que não sejam gerenciados pelo motor. Conflitos entram na política de autoridade;
+não existe uma parada obrigatória para revisão humana.
 
-Liste o que já existe e responda: **onde a verdade mora hoje?** Pastas de documentação,
-notas fora do repositório, wiki, README com instruções de execução, base de RAG. Cada
-uma dessas vai precisar ganhar uma jurisdição exclusiva ou ser aposentada — a Parte V,
-Fase 2 do `METODO.md` conduz isso.
+`docs/` é a jurisdição canônica instalada. Fontes externas permanecem ponteiros até que
+uma IA consiga confrontá-las com código, testes, configuração e histórico.
 
 Projeto novo: pode pular direto para o passo 1.
 
@@ -42,14 +40,14 @@ Projeto novo: pode pular direto para o passo 1.
 ## 1. Instale o pacote
 
 ```bash
-pipx install memoria-evolutiva     # ou: pip install memoria-evolutiva
+pipx install git+https://github.com/LastMind-dev/memoria-evolutiva.git@main
 ```
 
-Enquanto não estiver no PyPI, instale direto do GitHub:
-
-```bash
-pipx install git+https://github.com/LastMind-dev/memoria-evolutiva.git
-```
+O pacote ainda não foi publicado no PyPI. O `@main` acima é somente o bootstrap. O
+instalador descobre a procedência PEP 610 do pacote e fixa o workflow documental no
+commit Git exato de 40 caracteres; se não houver uma origem Git pública e verificável,
+fixa a versão exata `memoria-evolutiva==6.0.0`. Uma URL com credencial embutida nunca é
+copiada para o projeto.
 
 Isso traz o comando `memoria` para o seu PATH. **Nenhum script é copiado para o seu
 repositório** — no projeto só vai morar o que é seu. `pipx upgrade memoria-evolutiva`
@@ -63,23 +61,34 @@ ficam no repositório do pacote — leia de lá, não copie.
 > o que o gerador varre é configurável, e os extratores próprios rodam na linguagem
 > do projeto.
 
-Se o projeto já tem um `CLAUDE.md` ou `AGENTS.md` com conteúdo, atenção no passo
-seguinte: o instalador nunca sobrescreve nada, mas o conteúdo que estiver lá é fato de
-projeto e o lugar dele é `docs/PROJETO.md`. **Mover é trabalho seu** — mova, e só então
-deixe o ponteiro.
+Se o projeto já tem um `CLAUDE.md` ou `AGENTS.md`, o instalador preserva o conteúdo e
+insere somente um bloco gerenciado de descoberta. A IA extrai fatos verificáveis para
+`docs/`; adaptadores nunca viram uma segunda memória.
 
 ## 2. Rode o instalador — na raiz do projeto
+
+Antes, deixe o Hindsight local acessível em `http://127.0.0.1:8888` e instale o
+Graphify (`graphifyy`) de forma que `graphify` esteja no PATH. O Hindsight usa a
+configuração de modelo local/credencial do próprio serviço; segredo nunca entra em
+`padrao.json`.
 
 ```bash
 memoria instalar --projeto="meu-app" --codigo=src
 ```
 
-Ele publica no projeto o que é do projeto: a árvore `docs/` com os quatro arquivos de
-entrada e os moldes de PRD/FDD/HLD/LLD/ADR, o `padrao.json` comentado, os ponteiros de
-raiz (`CLAUDE.md`, `AGENTS.md`, `.cursor/`, `.windsurfrules`) e o workflow de CI.
+Ele publica a árvore e os moldes, detecta as linguagens, calcula SHA-256 de todas as
+fontes configuradas, produz o núcleo estrutural, mede a dívida inicial, valida, atualiza
+cada documento no Hindsight e cria o grafo Graphify. A cobertura por hash não é chamada
+de compreensão semântica: a skill autônoma percorre o manifesto e registra fatos
+demonstráveis nos blocos evolutivos preservados.
+Também gera o manifesto neutro e as entradas de Codex, Claude, Cursor, Windsurf e Hermes.
+Uma sessão nova inicia pelo canary específico e não pede avaliação humana do conteúdo.
+O instalador cria ainda três casos mínimos de avaliação, mede uma baseline somente se
+todos passarem e grava relatório/manifesto reconstruíveis da qualidade do RAG.
 
-`--codigo` é a pasta que o gerador varre (`src`, `app`, `lib`, `packages`...).
-Acrescente `--indice` se o projeto usa RAG ou índice semântico.
+`--codigo` é a pasta que o gerador varre (`src`, `app`, `lib`, `packages`...). Hindsight
+e Graphify já são padrão; não existe decisão por projeto sobre qual ferramenta usar.
+`--adiar-bancos` apenas adia a primeira sincronização e `--sem-bancos` é opt-out explícito.
 
 Ele troca `<NOME-DO-PROJETO>` pelo nome real nos modelos e transforma
 `docs/cronologia/AAAA-MM.md` no mês corrente. O `padrao.json` publicado vem com o nome
@@ -91,126 +100,77 @@ decisão sua ele nunca sobrescreve. Rodar de novo não estraga nada.
 > `projeto:` de cada documento com o do `padrao.json` — confira na saída do instalador
 > que o nome que apareceu é o seu.
 
-## 3. Preencha os quatro arquivos de entrada — nesta ordem
+## 3. Manutenção autônoma
 
-Esta é a única parte que ninguém pode fazer por você.
+```bash
+memoria documentar
+memoria avaliar verificar
+```
 
-| Arquivo | O que vai dentro |
+O comando atualiza apenas documentos marcados como gerenciados, regenera os derivados,
+valida e sincroniza Hindsight+Graphify. Não há proposta intermediária nem promoção humana.
+
+## 4. Como a IA decide
+
+| Arquivo | Função automática |
 |---|---|
-| `docs/PROJETO.md` | o que o projeto é, a jurisdição de cada acervo, o que é proibido, o formato de autorização, como você trabalha. |
-| `docs/ESTADO.md` | onde o projeto está hoje. Uma página, no máximo. |
-| `docs/ABERTO.md` | normalmente começa vazio — **menos** o que sobrar do passo abaixo. |
-| `docs/GLOSSARIO.md` | os termos que você já explicou duas vezes. |
+| `docs/PROJETO.md` | fatos comprovados, ordem de leitura e limites operacionais. |
+| `docs/ESTADO.md` | fotografia reproduzível da versão e da cobertura analisada. |
+| `docs/ABERTO.md` | fila de investigação autônoma; ausência de prova vira `indeterminado`. |
+| `docs/GLOSSARIO.md` | termos sustentados por uso observável, sem significado inventado. |
 
-### E a documentação de engenharia?
+A ordem obrigatória é: runtime/esquema, testes, código, configuração, CI, histórico,
+documentação e, por último, inferência. O contrato completo fica versionado em
+`docs/politicas/AUTONOMIA.md` e o validador reprova alterações manuais nessa política.
 
-O kit traz os moldes de **PRD, FDD, HLD, LLD e ADR** em `docs/_templates/`, cada um com as
-seções que importam e o comentário dizendo o erro que cada seção evita.
+### Engenharia sem decisões em aberto para a IA
 
-**Não escreva nenhum deles agora.** A regra que evita o padrão morrer de burocracia:
+O kit combina uma cobertura mecânica completa com uma estrutura semântica padronizada:
 
-> Nenhum documento é obrigatório. A cadeia é obrigatória quando existe.
+- arc42 organiza objetivos, restrições, contexto, blocos, runtime, implantação, decisões,
+  qualidade, riscos e glossário;
+- C4 define sistema, containers, componentes e código sem obrigar níveis sem evidência;
+- PRD → FDD → HLD → LLD mantém rastreabilidade do problema à implementação;
+- ADR registra contexto, decisão, alternativas e consequências;
+- Diátaxis separa tutorial, procedimento, referência e explicação.
 
-Você pode ter um FDD sem PRD, um ADR solto, um HLD cobrindo três funcionalidades. O que
-não pode é um documento que não diz de onde veio — é para isso que serve o campo
-`deriva_de`, e é ele que o validador confere. A Parte III-B do `METODO.md` explica a cadeia
-inteira; o mapa dela é **gerado** em `docs/gerado/cadeia-documentos.md`.
+A IA não decide qual estrutura prefere: usa esta. Também não decide se uma hipótese
+"parece provável": sem fonte suficiente, escreve `indeterminado` e segue para o próximo
+item de `docs/ABERTO.md`.
 
-**As oito decisões da Parte IV do MÉTODO moram em dois lugares**, e é bom saber qual é
-qual antes de começar:
-
-| # | Decisão | Onde vai |
-|---|---|---|
-| 1 | quais acervos existem, quem manda em quê | `docs/PROJETO.md` |
-| 2 | vocabulário de `tipo` e `status` | `padrao.json` → `vocabulario` (passo 4) |
-| 3 | o que é gerado, por qual script | `padrao.json` → `gerado` (passo 4) |
-| 4 | quais regras viram catraca | `padrao.json` → `catraca` (passo 4) |
-| 5 | tem índice? qual o núcleo? | `padrao.json` → `memoria` (passo 4) |
-| 6 | quem commita, e quando | `docs/PROJETO.md` |
-| 7 | formato de autorização para ação irreversível | `docs/PROJETO.md` |
-| 8 | como o dono trabalha | `docs/PROJETO.md` |
-
-> **Um `PROJETO.md` genérico é pior que nenhum**, porque parece pronto. Se você não sabe
-> responder a uma das oito, **escreva que ainda não está decidido e abra a entrada em
-> `ABERTO.md`** — isso é informação verdadeira e útil, e é por isso que o `ABERTO.md`
-> costuma nascer com uma ou duas entradas em vez de vazio. Preencher com o que soa
-> razoável é o que produz documento que mente.
-
-**Antes de escrever o `PROJETO.md`, leia `EXEMPLO-PROJETO-PREENCHIDO.md`.** É um
-`PROJETO.md` real de ponta a ponta, com a explicação do que cada seção faz que um
-preenchimento apressado não faz. Economiza a primeira versão inútil.
-
-## 4. Configure os contadores da catraca
-
-Abra `padrao.json` → `catraca.contadores`. Vem um só: documento sem frontmatter. O
-bloco `_exemplos_de_contador`, no fim do arquivo, tem moldes para copiar.
-
-Vira catraca a regra que um `grep` decide sozinho. Regra que exige entender semântica —
-"o nome da variável faz sentido?" — não vira contador; fica documental, em
-`docs/politicas/`.
-
-Duas coisas que só se descobrem lendo o código dos scripts, então estão aqui:
-
-- **`excluir` casa por trecho de caminho, não por pasta.** `"/config/"` exclui qualquer
-  caminho que contenha `/config/`. Se o seu projeto não tem pasta `config/` e sim uma
-  classe `src/Config.php`, o trecho a excluir é `"Config.php"`.
-- **`onde` é relativo à raiz do repositório**, e o contador varre recursivamente.
-
-Este é também o momento de decidir as decisões 2, 3 e 5 da tabela acima — vocabulário, o
-que é gerado e o núcleo do índice. Elas moram neste arquivo, não no `PROJETO.md`.
-
-## 5. Gere, meça, verifique
+## 5. Verificação automática
 
 ```bash
-memoria gerar                  # extrai do código o que não se escreve à mão
-memoria catraca --medir     # congela a dívida atual como linha de base
-memoria validar                # precisa passar
-memoria autoteste                   # os validadores pegam mesmo o que prometem?
+memoria documentar
+memoria autoteste
+memoria executar --run-id=primeira-verificacao --acao=verificar --json
 ```
 
-**Olhe a saída do gerador pelo menos uma vez.** A verificação de derivado confere se a
-saída é *reprodutível*, não se ela é *verdadeira* — um extrator com bug produz o mesmo
-resultado errado toda vez e passa. Abra `docs/gerado/` e confira se os números batem com
-o que você sabe do seu projeto.
+O primeiro comando relê fontes, atualiza os documentos gerenciados, regenera derivados e
+valida. O segundo quebra uma cópia temporária e comprova que política alterada, cobertura
+velha, âncora morta, cadeia inválida e dívida crescente não passam silenciosamente.
 
-O `memoria autoteste` quebra uma **cópia temporária** do projeto de propósito, uma coisa por
-vez, e confere que o validador certo reclama. Nada é alterado no seu repositório. É o
-teste do alarme de incêndio: apertar o botão. Rode-o de novo sempre que mexer no
-`padrao.json`.
+### Os dois bancos locais
 
-O `--medir` só na instalação. Dali em diante, qualquer número que **aumente** quebra o
-build; o passivo antigo fica congelado e visível. Quando um contador chegar a zero,
-promova a regra a falha dura.
-
-### Se o projeto tem índice semântico (RAG)
-
-Antes de indexar qualquer coisa, **leia o `RAG.md`** — ele decide o que entra, como fatiar,
-quais metadados cada registro carrega e quando reindexar. Errar o fatiamento agora custa
-uma reindexação completa depois.
-
-Preencha `docs/runbooks/indexacao.md` com o procedimento deste projeto, indexe o núcleo
-listado em `padrao.json` → `memoria.nucleo`, e **só então**:
+O Hindsight guarda uma cópia substituível por documento do núcleo listado em
+`memoria.nucleo`, com tags estritas, metadados e `source_uri`. Depois do `retain` em lote,
+o motor lê cada documento de volta e exige ao menos uma memória por fonte. O Graphify extrai AST
+localmente e mantém uma assinatura por arquivo de código.
 
 ```bash
-memoria indice --marcar
+memoria bancos sincronizar
+memoria bancos status
+memoria bancos consultar --pergunta="onde esta regra é implementada e por quê?"
+memoria contexto --pergunta="onde esta regra é implementada e por quê?" --perfil=engenharia-leitura --json
 ```
 
-Marcar sem indexar de verdade transforma a verificação em teatro.
+Não existe `--marcar`: o marcador é gravado somente pelo adaptador após confirmação.
+Uma mudança em `docs/` ou no código bloqueia consultas até nova sincronização.
 
-Se o projeto **não** tem índice: `memoria.ativo: false` no `padrao.json` e apague
-`docs/runbooks/indexacao.md`. O método funciona inteiro sem índice — e um runbook que
-descreve algo inexistente é a primeira mentira do acervo.
+## 6. CI e publicação
 
-## 6. Commite e confira o CI
-
-```bash
-git add -A && git commit -m "estrutura de memória evolutiva"
-```
-
-As verificações rodam a cada push e a cada pull request. **Precisa ficar verde no
-primeiro commit** — é por isso que a catraca existe. Build que nasce vermelho ninguém
-olha, e em duas semanas a verificação inteira vira ruído que todo mundo aprende a
-ignorar.
+As verificações rodam a cada push e pull request. Instalar e documentar não autorizam
+commit, push ou publicação; essas ações seguem a política operacional do projeto.
 
 > O workflow dispara em `push` para **`main`**. Se o seu repositório usa `master` ou
 > outro nome, ajuste `branches:` em `.github/workflows/documentacao.yml` — senão o CI
@@ -218,27 +178,11 @@ ignorar.
 
 ---
 
-## 7. O teste que realmente importa
+## 7. Teste de leitura fria automatizado
 
-Abra uma sessão nova, num modelo que **nunca viu este projeto**, e mande:
-
-> Comece por `docs/PROJETO.md` e siga a ordem de leitura que ele indica. Depois me diga:
-> onde o projeto está, o que está em conflito, e o que eu não posso fazer sem
-> autorização.
-
-O pedido é "comece por `PROJETO.md` **e siga a ordem que ele indica**", não "leia só o
-`PROJETO.md`". O `PROJETO.md` de propósito não responde onde o projeto está — isso é
-jurisdição do `ESTADO.md`. O que está sendo testado é se ele **conduz** até lá sozinho.
-
-**Leia a parte que ele errar com muito mais atenção do que a parte que ele acertar.**
-Cada erro é um buraco no documento, não um defeito do modelo. Corrija o documento e
-repita com uma sessão nova — nunca com a mesma, que já foi contaminada pela resposta
-anterior.
-
-Na prática esse teste encontra mais defeito que qualquer revisão feita por quem escreveu.
-Numa aplicação real, ele encontrou dezessete — incluindo pastas descritas como vazias
-que tinham conteúdo, uma ordem de leitura congelada num mês que já tinha passado, e três
-significados diferentes para a mesma palavra que ninguém tinha percebido.
+Uma nova sessão de IA começa em `docs/PROJETO.md`, segue a ordem declarada e confronta as
+respostas com o manifesto de cobertura e as âncoras. Divergência abre investigação
+autônoma e executa novamente `memoria documentar`; não vira pedido de validação humana.
 
 ---
 
@@ -256,15 +200,25 @@ Comece cada sessão pelo `PROJETO.md`, feche cada sessão pelo runbook, e deixe 
 
 | Script | O que faz | Falha quando |
 |---|---|---|
-| `memoria instalar` | instala | — |
+| `memoria instalar` | instala, documenta, valida e sincroniza os bancos | etapa ou provedor local não confirma |
+| `memoria documentar` | relê, atualiza, gera, valida e sincroniza | política, cobertura, estrutura ou banco diverge |
+| `memoria diagnosticar` | inventário factual, sem escrita | configuração inválida |
+| `memoria analisar` | consolida evidências e lacunas, sem escrita | configuração inválida |
+| `memoria propor-documentacao` | compatibilidade legada; rascunhos opcionais | proposta existente seria sobrescrita |
 | `memoria gerar` | extrai do código o que não deve ser escrito à mão | extrator declarado não existe |
 | `memoria validar` | frontmatter, vocabulário, ids, **âncoras**, derivados, ponteiros | âncora aponta para arquivo inexistente; derivado editado à mão ou desatualizado; ponteiro virou fonte paralela |
 | `memoria catraca` | mede a dívida congelada | algum contador aumentou |
-| `memoria indice` | o índice semântico está em dia com os documentos | documento do núcleo mudou desde a última indexação |
+| `memoria bancos` | status, sincronização e consulta conjunta | banco ausente, velho ou não confirmado |
+| `memoria fragmentos` | gera ou verifica o corpus determinístico do RAG em modo sombra | fonte, âncora, hash, algoritmo ou perfil diverge |
+| `memoria contexto` | recupera envelope neutro por CLI, MCP stdio ou HTTP local | fonte, perfil, frescor ou orçamento inválido |
+| `memoria indice` | compatibilidade: estado do Hindsight | documento do núcleo mudou |
 | `memoria autoteste` | quebra uma cópia de propósito e confere que os validadores reclamam | algum validador parou de pegar o que promete |
-| `memoria skill` | monta a peça de procedimento (skill/comando) a partir do runbook | — (`--conferir` avisa quando a peça ficou para trás) |
+| `memoria executar ... --json` | ação não interativa, idempotente e isolada | o envelope identifica falha, timeout, lock ou capacidade recusada |
+| `memoria avaliar` | mede/verifica hit@1, hit@3, citações, ausência de fonte e drift | corpus, baseline, perfil ou métrica regride |
+| `memoria skill` | monta a peça de procedimento (skill/comando) a partir do runbook | `--conferir` falha se fonte, gerador ou artefato divergir |
 
-Nenhum sobe framework, toca banco ou faz rede. Rodam em Linux, macOS e Windows.
+Os comandos estruturais não sobem o projeto. `documentar` e `bancos` acessam somente os
+provedores configurados; extrator próprio e Graphify operam com as permissões do processo.
 
 **Não edite os scripts.** Se precisar mudar comportamento, provavelmente falta uma opção
 no `padrao.json` — abra uma entrada em `docs/ABERTO.md` em vez de editar. Script alterado

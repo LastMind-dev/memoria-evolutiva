@@ -22,11 +22,13 @@ from __future__ import annotations
 import glob as _glob
 import json
 import os
+import re
 import subprocess
 import sys
 from datetime import date
 from pathlib import Path
 
+from . import analisar, diagnosticar
 from .lib import (acervo, arquivos_por_extensao, barras, comeca_com, commit_atual,
                   config, frontmatter, markdowns, morre, pacote, raiz, relativo, titulo)
 
@@ -39,6 +41,7 @@ def cabecalho(id_: str, titulo_: str, projeto: str, commit: str) -> str:
         f"projeto: {projeto}\n"
         f"titulo: {titulo_}\n"
         "status: verificado\n"
+        "classificacao: interno\n"
         f"verificado_em: {date.today().isoformat()}\n"
         f"verificado_commit: {commit}\n"
         "---\n\n"
@@ -67,7 +70,11 @@ def extrator_mapa_diretorios(c: dict) -> tuple[str, str]:
     def conta(dir_: str) -> int:
         return sum(len(arquivos_por_extensao(dir_, e)) for e in exts)
 
-    dirs = sorted(barras(d) for d in _glob.glob(raiz_codigo + "/*") if Path(d).is_dir())
+    dirs = sorted(
+        barras(d)
+        for d in _glob.glob(raiz_codigo + "/*")
+        if Path(d).is_dir() and Path(d).name not in diagnosticar.PULAR
+    )
     linhas: list[str] = []
     total = 0
 
@@ -221,6 +228,26 @@ def extrator_cadeia_documentos(c: dict) -> tuple[str, str]:
     return ("Cadeia de documentos", corpo)
 
 
+def extrator_cobertura_codigo(c: dict) -> tuple[str, str]:
+    """Manifesto completo do repositório efetivamente lido pelo diagnóstico."""
+    itens = diagnosticar.inventario_projeto()
+    corpo = (
+        "Prova mecânica de cobertura do repositório. Cada linha identifica o conteúdo\n"
+        "exato que foi lido; o hash prova cobertura, não compreensão semântica.\n\n"
+        "| Arquivo | Bytes | SHA-256 |\n|---|---:|---|\n"
+    )
+    if itens:
+        for item in itens:
+            corpo += (
+                f"| `{item['arquivo']}` | {item['bytes']} | "
+                f"`{item['sha256']}` |\n"
+            )
+    else:
+        corpo += "| — | 0 | — |\n"
+    corpo += f"\n**Total: {len(itens)} arquivos do projeto lidos integralmente.**\n"
+    return ("Cobertura das fontes analisadas", corpo)
+
+
 # ═══════════════════════════════════════════════════════════ execução
 
 def _extratores_do_projeto(c: dict) -> dict[str, dict]:
@@ -249,23 +276,56 @@ def _extratores_do_projeto(c: dict) -> dict[str, dict]:
               '{"nome","id","titulo","corpo"}.\n'
               f"Recebi: {r.stdout[:200]!r}\n")
 
+    if not isinstance(lista, list):
+        morre(f"`{ext}` precisa imprimir uma lista JSON, não {type(lista).__name__}.\n")
+
     extras: dict[str, dict] = {}
     for item in lista:
+        if not isinstance(item, dict):
+            morre(f"Extrator em `{ext}` precisa ser objeto JSON: {item!r}\n")
         if not all(k in item for k in ("nome", "id", "titulo", "corpo")):
             morre(f"Extrator em `{ext}` sem os campos nome/id/titulo/corpo: {item.get('nome')!r}\n")
-        extras[item["nome"]] = item
+        if not all(isinstance(item[k], str) for k in ("nome", "id", "titulo", "corpo")):
+            morre(f"Extrator em `{ext}`: nome/id/titulo/corpo precisam ser textos.\n")
+        nome = item["nome"]
+        if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", nome):
+            morre(
+                f"Extrator em `{ext}` com nome inseguro `{nome}`. "
+                "Use apenas letras ASCII, números, ponto, `_` e `-`, sem caminho.\n"
+            )
+        extras[nome] = item
     return extras
 
 
-def main() -> int:
+def main(saida_override: str | Path | None = None, silencioso: bool = False) -> int:
     c = config()
-    saida = Path(raiz()) / c["gerado"]["diretorio"].strip("/")
+    # O validador usa uma pasta temporária para comparar a saída esperada sem tocar
+    # na árvore que está verificando. A CLI normal continua escrevendo no diretório
+    # configurado do projeto.
+    saida = (Path(saida_override) if saida_override is not None
+             else Path(raiz()) / c["gerado"]["diretorio"].strip("/"))
     saida.mkdir(parents=True, exist_ok=True)
     commit = commit_atual() or "desconhecido"
 
     embutidos = {
         "mapa-diretorios": ("GERADO-MAPA", extrator_mapa_diretorios),
         "cadeia-documentos": ("GERADO-CADEIA", extrator_cadeia_documentos),
+        "cobertura-codigo": ("GERADO-COBERTURA-CODIGO", extrator_cobertura_codigo),
+        "diagnostico-projeto": (
+            "GERADO-DIAGNOSTICO",
+            lambda _c: ("Diagnóstico estrutural do projeto",
+                        diagnosticar.como_markdown(
+                            diagnosticar.coletar(incluir_estado_trabalho=False),
+                            mostrar_git=False,
+                        )),
+        ),
+        "analise-inicial": (
+            "GERADO-ANALISE-INICIAL",
+            lambda _c: ("Análise inicial e lacunas",
+                        analisar.como_markdown(analisar.consolidar(
+                            diagnosticar.coletar(incluir_estado_trabalho=False)
+                        ))),
+        ),
     }
     extras = _extratores_do_projeto(c)
 
@@ -285,10 +345,11 @@ def main() -> int:
             cabecalho(id_, titulo_, c["projeto"], commit) + f"# {titulo_}\n\n" + corpo,
             encoding="utf-8",
         )
-        feitos.append(relativo(str(arq)))
+        feitos.append(relativo(str(arq)) if saida_override is None else arq.name)
 
-    titulo(f"Derivados gerados em `{commit}`")
-    for f in feitos:
-        print(f"  {f}")
-    print("\nNunca edite estes arquivos à mão — `memoria validar` reprova se você editar.")
+    if not silencioso:
+        titulo(f"Derivados gerados em `{commit}`")
+        for f in feitos:
+            print(f"  {f}")
+        print("\nNunca edite estes arquivos à mão — `memoria validar` reprova se você editar.")
     return 0

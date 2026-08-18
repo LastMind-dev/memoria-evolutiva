@@ -10,6 +10,7 @@ Nada é alterado no seu projeto.
 
 from __future__ import annotations
 
+import json
 import shutil
 import subprocess
 import sys
@@ -50,11 +51,11 @@ def _cabecalho(id_: str, tipo: str, status: str, pais: list[str], projeto: str) 
           "verificado_em: 2026-01-01\nverificado_commit: 0000000\n")
     if pais:
         fm += "deriva_de:\n" + "".join(f"  - {p}\n" for p in pais)
-    return fm + "---\n\n# documento de teste\n"
+    return fm + "ancoras:\n  - padrao.json\n---\n\n# documento de teste\n"
 
 
 def _rodar(tmp: Path, comando: str) -> tuple[int, str]:
-    r = subprocess.run([sys.executable, "-m", "memoria_evolutiva", comando],
+    r = subprocess.run([sys.executable, "-m", "memoria_evolutiva", *comando.split()],
                        capture_output=True, text=True, cwd=str(tmp))
     return r.returncode, r.stdout + r.stderr
 
@@ -66,6 +67,11 @@ def main() -> int:
     ger_dir = c["gerado"].get("diretorio", "docs/gerado").strip("/")
     tem_cadeia = len(c.get("cadeia", {}).get("niveis", {})) > 1
     tem_ponteiros = bool(c.get("ponteiros", {}).get("arquivos"))
+    tem_autonomia = bool(c.get("autonomia", {}).get("ativo"))
+    tem_grafo = bool(c.get("grafo", {}).get("ativo"))
+    tem_fragmentos = isinstance(c.get("rag", {}), dict)
+    tem_adaptadores = isinstance(c.get("adaptadores", {}), dict)
+    tem_avaliacao = isinstance(c.get("avaliacao", {}), dict)
 
     def quebra_gerado(t: Path) -> None:
         for g in sorted((t / ger_dir).glob("*.md")):
@@ -89,11 +95,73 @@ def main() -> int:
         subprocess.run([sys.executable, "-m", "memoria_evolutiva", "gerar"],
                        capture_output=True, cwd=str(t))
 
+    def quebra_politica_autonoma(t: Path) -> None:
+        politica = t / str(c["autonomia"]["politica"])
+        politica.write_text(
+            politica.read_text(encoding="utf-8").replace(
+                "comportamento executado", "preferência arbitrária"
+            ),
+            encoding="utf-8",
+        )
+
+    def quebra_cobertura(t: Path) -> None:
+        codigo = t / c.get("gerado", {}).get("raiz", "").strip("/")
+        extensoes = {
+            "." + str(ext).lower().lstrip(".")
+            for ext in c.get("gerado", {}).get("extensoes", [])
+        }
+        for fonte in sorted(codigo.rglob("*")):
+            if fonte.is_file() and fonte.suffix.lower() in extensoes:
+                fonte.write_bytes(fonte.read_bytes() + b"\n")
+                return
+
+    def quebra_grafo(t: Path) -> None:
+        grafo = t / str(c.get("grafo", {}).get("arquivo", "graphify-out/graph.json"))
+        grafo.write_text("{corrompido", encoding="utf-8")
+
+    def quebra_fragmentos(t: Path) -> None:
+        manifesto = t / str(c.get("rag", {}).get(
+            "manifesto", "docs/gerado/manifesto-fragmentos-v2.json"
+        ))
+        manifesto.write_text(
+            manifesto.read_text(encoding="utf-8") + "\n",
+            encoding="utf-8",
+        )
+
+    def quebra_adaptador(t: Path) -> None:
+        caminho = t / ".cursor/rules/memoria-evolutiva.mdc"
+        caminho.write_text(
+            caminho.read_text(encoding="utf-8").replace("Gateway read-only", "Gateway read-write"),
+            encoding="utf-8",
+        )
+
+    def quebra_redaction(t: Path) -> None:
+        caminho = t / "padrao.json"
+        dados = json.loads(caminho.read_text(encoding="utf-8"))
+        dados["seguranca_memoria"]["redaction_antes_retain"] = False
+        caminho.write_text(
+            json.dumps(dados, ensure_ascii=False, indent=4) + "\n", encoding="utf-8"
+        )
+
+    def quebra_executor(t: Path) -> None:
+        caminho = t / "padrao.json"
+        dados = json.loads(caminho.read_text(encoding="utf-8"))
+        dados["executor"]["publicacao_automatica"] = True
+        caminho.write_text(
+            json.dumps(dados, ensure_ascii=False, indent=4) + "\n", encoding="utf-8"
+        )
+
+    def quebra_avaliacao(t: Path) -> None:
+        caminho = t / str(c["avaliacao"]["relatorio"])
+        caminho.write_text(
+            caminho.read_text(encoding="utf-8") + "\n", encoding="utf-8"
+        )
+
     testes: list[dict] = [
         dict(nome="âncora apontando para arquivo inexistente",
              quebra=lambda t: _escrever(t / "docs/arquitetura/_teste.md",
                  _cabecalho("TESTE-ANCORA", "hld", "rascunho", [], projeto).replace(
-                     "---\n\n#", "ancoras:\n  - caminho/que/nao/existe.php\n---\n\n#")),
+                     "  - padrao.json", "  - caminho/que/nao/existe.php")),
              comando="validar", esperado=1, contem="âncora quebrada"),
         dict(nome="tipo fora do vocabulário",
              quebra=lambda t: _escrever(t / "docs/arquitetura/_teste.md",
@@ -110,6 +178,12 @@ def main() -> int:
              comando="validar", esperado=1, contem="duplicado"),
         dict(nome="arquivo derivado editado à mão",
              quebra=quebra_gerado, comando="validar", esperado=1, contem="editado à mão"),
+        dict(nome="política autônoma adulterada",
+             quebra=quebra_politica_autonoma, comando="validar", esperado=1,
+             contem="política autônoma alterada", aplica=tem_autonomia),
+        dict(nome="fonte mudou sem atualizar a cobertura",
+             quebra=quebra_cobertura, comando="validar", esperado=1,
+             contem="cobertura-codigo.md", aplica=tem_autonomia),
         dict(nome="ponteiro da raiz virou fonte paralela",
              quebra=quebra_ponteiro, comando="validar", esperado=1, contem="fonte paralela",
              aplica=tem_ponteiros),
@@ -147,7 +221,25 @@ def main() -> int:
                  t / c["acervos"]["canonico"].strip("/") / "_teste_legado.md",
                  "# sem frontmatter\n"),
              comando="validar", esperado=0, contem=None),
-        dict(nome="projeto intacto passa nas três verificações",
+        dict(nome="grafo corrompido reprova mesmo com hashes de fonte iguais",
+             quebra=quebra_grafo, comando="bancos status --offline", esperado=1,
+             contem="marcador do Graphify inválido", aplica=tem_grafo),
+        dict(nome="manifesto de fragmentos adulterado reprova",
+             quebra=quebra_fragmentos, comando="fragmentos verificar", esperado=1,
+             contem="manifesto diverge", aplica=tem_fragmentos),
+        dict(nome="adaptador de agente adulterado reprova",
+             quebra=quebra_adaptador, comando="adaptadores verificar", esperado=1,
+             contem="adaptador", aplica=tem_adaptadores),
+        dict(nome="redaction antes do retain não pode ser desativada",
+             quebra=quebra_redaction, comando="validar", esperado=1,
+             contem="redaction_antes_retain"),
+        dict(nome="executor não pode habilitar publicação automática",
+             quebra=quebra_executor, comando="validar", esperado=1,
+             contem="executor.publicacao_automatica"),
+        dict(nome="relatório de avaliação RAG adulterado reprova",
+             quebra=quebra_avaliacao, comando="avaliar verificar", esperado=1,
+             contem="relatório RAG", aplica=tem_avaliacao),
+        dict(nome="projeto intacto passa nas verificações locais",
              quebra=lambda t: None, comando=None, esperado=0, contem=None),
     ]
 
@@ -168,7 +260,9 @@ def main() -> int:
             _copiar(origem, tmp)
             t["quebra"](tmp)
 
-            comandos = [t["comando"]] if t["comando"] else ["validar", "catraca", "indice"]
+            comandos = ([t["comando"]] if t["comando"]
+                        else ["validar", "catraca", "bancos status --offline",
+                              "avaliar verificar"])
             rc_final, saida_final = 0, ""
             for cmd in comandos:
                 rc, saida = _rodar(tmp, cmd)

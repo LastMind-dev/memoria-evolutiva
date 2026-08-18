@@ -43,6 +43,11 @@ def raiz() -> str:
     funcionar instalado via pipx, via vendor, ou avulso — e chamado de um subdiretório.
     Num projeto virgem (instalador) devolve o cwd: RODE O INSTALADOR NA RAIZ.
     """
+    declarada = os.environ.get("MEMORIA_PROJETO_RAIZ")
+    if declarada:
+        resolvida = Path(declarada).resolve()
+        if (resolvida / "padrao.json").is_file():
+            return barras(str(resolvida))
     dir_ = barras(os.getcwd())
     sobe = Path(dir_)
     while True:
@@ -194,7 +199,15 @@ def hash_do_conteudo(conteudo: str) -> str:
     por ela. O teste de paridade compara os dois byte a byte.
     """
     limpo = re.sub(r"^verificado_(em|commit): .*$", "X", conteudo, flags=re.M)
-    limpo = re.sub(r"em `[^`]*`\.$", "em `X`.", limpo, flags=re.M)
+    # Restrito ao carimbo que o gerador realmente produz. A expressão antiga casava
+    # qualquer frase terminada em "em `...`.", fazendo mudanças como produção →
+    # homologação desaparecerem do hash de um documento escrito à mão.
+    limpo = re.sub(
+        r"^(> Gerado por `(?:memoria gerar|vendor/bin/memoria gerar)` em )`[^`]*`\.$",
+        r"\1`X`.",
+        limpo,
+        flags=re.M,
+    )
     return hashlib.sha256(limpo.encode("utf-8")).hexdigest()[:16]
 
 
@@ -213,6 +226,23 @@ def commit_atual() -> str:
 def titulo(texto: str) -> None:
     print(f"\n{texto}")
     print("─" * min(len(texto), 72))
+
+
+def preparar_saida() -> None:
+    """Evita que caracteres de apresentação derrubem a CLI em consoles legados.
+
+    Em Windows, stdout redirecionado pode usar CP1252 mesmo quando o terminal interativo
+    aceita UTF-8. Os textos em português continuam representáveis; separadores, setas e
+    emojis viram ``?`` quando necessário, em vez de abortarem depois de uma gravação.
+    """
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is None:
+            continue
+        try:
+            reconfigure(errors="replace")
+        except (AttributeError, ValueError):
+            pass
 
 
 def limpar_caches() -> None:

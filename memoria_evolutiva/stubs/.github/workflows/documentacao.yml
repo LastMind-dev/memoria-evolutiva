@@ -3,8 +3,8 @@ name: Documentação
 # Impede que a documentação canônica volte a mentir.
 #
 # Os validadores vêm do pacote `memoria-evolutiva` (Python), instalado via pip — sem
-# dependências além da biblioteca padrão. Quatro verificações, com severidades
-# DELIBERADAMENTE diferentes:
+# dependências além da biblioteca padrão. As verificações têm severidades
+# DELIBERADAMENTE diferentes; os passos abaixo formam uma única catraca:
 #
 #   memoria validar     FALHA DURA para documento que tem frontmatter. Âncora quebrada,
 #                       vocabulário inválido, id duplicado, cadeia rompida ou derivado
@@ -14,15 +14,15 @@ name: Documentação
 #                       Quando a regra nasce depois do código, reprovar tudo trava o
 #                       time sem consertar nada — e build que nasce vermelho ninguém olha.
 #
-#   memoria indice      O índice semântico costuma ser alcançado por ferramenta que
-#                       roda na máquina de quem trabalha, não aqui. Este passo NÃO
-#                       reindexa: torna visível que precisa.
+#   memoria bancos status --offline  Compara documentos/código e artefatos locais com
+#                                     os marcadores. O runner não hospeda Hindsight.
 #
 #   memoria autoteste   Quebra uma cópia do projeto de propósito e confere que cada
 #                       validador reclama do que promete. Verificador que não reprova
 #                       nada é indistinguível de verificador quebrado.
 #
-# Nenhum sobe framework, toca banco ou faz rede.
+# A instalação baixa a versão imutável do pacote. As verificações não sobem framework
+# nem tocam banco do produto.
 #
 # Se os extratores próprios do projeto (`gerado.extensao_do_projeto`) forem escritos
 # em outra linguagem, instale o interpretador dela aqui — ex.: PHP via
@@ -42,8 +42,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          # a verificação compara verificado_commit com o HEAD; precisa do histórico
-          fetch-depth: 0
+          fetch-depth: 1
 
       - name: Instalar Python
         uses: actions/setup-python@v5
@@ -51,7 +50,8 @@ jobs:
           python-version: '3.11'
 
       - name: Instalar os validadores
-        run: pip install memoria-evolutiva
+        # O instalador troca o marcador por SHA Git exato ou versão exata do release.
+        run: pip install <MEMORIA_EVOLUTIVA_ORIGEM_IMUTAVEL>
 
       - name: Estrutura, âncoras, cadeia e derivados
         run: memoria validar
@@ -59,8 +59,17 @@ jobs:
       - name: Catraca da dívida
         run: memoria catraca
 
-      - name: Índice em dia
-        run: memoria indice
+      - name: Hindsight e Graphify em dia
+        run: memoria bancos status --offline
+
+      - name: Skill portátil em dia, quando gerada
+        run: memoria skill --conferir
+
+      - name: Manifesto determinístico do RAG em dia
+        run: memoria fragmentos verificar
+
+      - name: Catraca de qualidade e drift do RAG
+        run: memoria avaliar verificar
 
       - name: Os validadores ainda pegam o que prometem
         run: memoria autoteste
@@ -70,6 +79,9 @@ jobs:
         run: |
           echo "::notice::Derivado divergente → rode 'memoria gerar' e commite a saída."
           echo "::notice::Catraca → código novo introduziu violação. Ver docs/politicas/."
-          echo "::notice::Índice → reindexe os documentos listados e rode 'memoria indice --marcar'."
+          echo "::notice::Bancos → rode 'memoria bancos sincronizar' e versione os artefatos."
+          echo "::notice::Skill → rode 'memoria skill' e versione novamente a peça derivada."
+          echo "::notice::RAG → rode 'memoria fragmentos gerar' e versione o manifesto."
+          echo "::notice::Avaliação RAG → corrija a recuperação e rode 'memoria avaliar gerar'; só use 'medir' para uma nova linha de base deliberada."
           echo "::notice::Âncora quebrada → o documento cita arquivo que não existe. O código ganha."
           echo "::notice::Cadeia → deriva_de aponta para documento inexistente, invertido ou superado."

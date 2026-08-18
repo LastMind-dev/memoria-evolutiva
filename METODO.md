@@ -165,9 +165,13 @@ Todo registro do índice semântico carrega de onde veio e de qual versão: `ori
 
 **Registro sem proveniência é purgado, não corrigido.** Não dá para consertar um fato do qual você não sabe a origem — só dá para recriá-lo a partir da fonte.
 
-### 10. Divergência não se resolve, se registra
+### 10. Divergência não se inventa; aplica-se a autoridade e registra-se o restante
 
-Quando duas fontes discordam, o agente **não escolhe**. Registra numa fila de arbitragem, com número, e para.
+Quando duas fontes discordam, o agente aplica a ordem objetiva de autoridade. Atualiza a
+fonte inferior e registra a divergência com as duas âncoras. Se forem fontes do mesmo
+nível e nenhuma evidência reproduzível desempatar, registra `indeterminado` na fila e
+continua todo trabalho independente. Só bloqueia a ação que dependa daquela resposta ou
+que atravesse uma fronteira operacional não autorizada.
 
 Isso parece burocracia até a primeira vez em que um agente "resolve" uma divergência escolhendo o lado errado com muita confiança.
 
@@ -233,9 +237,15 @@ L4  acervo de exploração        metodologia, rascunho, contexto de negócio
 L5  índice semântico            busca. derivado. reconstruível. zero autoridade.
 ```
 
-**L4 e L5 são opcionais.** Um projeto pequeno vive muito bem com L0 a L3, e a portabilidade entre LLMs — que é o objetivo principal — está inteira em L2 e L3.
+**L4 e L5 continuam derivados, mas a distribuição padrão os instala.** Um opt-out explícito
+mantém L0 a L3 funcionais; sem opt-out, Hindsight e Graphify fazem parte da condição de
+conclusão e são verificados por assinatura.
 
-**Há um segundo índice opcional, irmão do L5: o grafo de código** (code-review-graph, Graphify e similares). O L5 busca por *significado* nos documentos; o grafo responde *estrutura* no código — quem chama o quê, o que quebra se mexer aqui. Perguntas diferentes, mesma regra: **derivado, reconstruível, autoridade zero.** O grafo descreve o que o código É com fidelidade perfeita — inclusive quando o código está errado; é o FDD que permite perceber isso. Declare-o em `padrao.json` → `grafo` e na tabela de jurisdição, e o método não precisa verificá-lo: essas ferramentas se reindexam sozinhas.
+**O segundo índice padrão é o grafo de código Graphify.** O Hindsight busca por
+*significado* nos documentos; o grafo responde *estrutura* no código — quem chama o quê,
+o que quebra se mexer aqui. Perguntas diferentes, mesma regra: **derivado,
+reconstruível, autoridade zero.** O método compara SHA-256 por fonte e bloqueia consulta
+quando o grafo fica velho; autoatualização presumida não é prova.
 
 **Onde ficam os quatro arquivos de entrada nesse esquema:** `PROJETO.md` e `ABERTO.md` são L2 (fatos estáveis — as regras do projeto e a lista de conflitos abertos mudam devagar). `cronologia/` é L3, por definição. `ESTADO.md` é o único fora da escala: ele é **um recorte do L3**, o topo da cronologia reescrito em prosa curta para leitura imediata. Por isso é o único documento que pode ser jogado fora e reconstruído a partir da cronologia — e por isso ele é reescrito em vez de acumulado. As regras de frontmatter valem para os quatro, sem exceção.
 
@@ -408,7 +418,7 @@ Na prática, para ADR: o ADR depende do documento que **motivou** a decisão; qu
 | FDD, HLD ou LLD sem `deriva_de` | aviso | detalhamento que ninguém conferiu contra requisito nenhum |
 | pai reverificado depois do filho | aviso | não quer dizer errado — quer dizer que ninguém olhou |
 
-Os dois últimos são aviso e não erro **de propósito**. Como falha dura encheriam o build de vermelho por mudança de vírgula no pai, e build que vive vermelho ninguém olha. A régua fica onde há resposta objetiva; onde há julgamento, a ferramenta mostra e o humano decide.
+Os dois últimos são aviso e não erro **de propósito**. Como falha dura encheriam o build de vermelho por mudança de vírgula no pai, e build que vive vermelho ninguém olha. A régua fica onde há resposta objetiva; onde ainda falta evidência, o agente registra `indeterminado` e investiga sem inventar.
 
 E o mapa da cadeia inteira é **gerado**, em `docs/gerado/cadeia-documentos.md` — porque é uma visão que depende de ler o cabeçalho de dezenas de arquivos, e ninguém mantém isso à mão sem errar.
 
@@ -502,18 +512,24 @@ Idioma, nível de detalhe, se quer opções antes da execução, o que nunca dev
 
 ### Fase 1 — Bootstrap (uma sessão)
 
-1. Criar a estrutura e os quatro arquivos de entrada
-2. Preencher o `PROJETO.md` com as oito decisões
-3. Rodar o gerador pela primeira vez
-4. **Medir a dívida e congelar a linha de base**
-5. Instalar as verificações no CI
-6. **Teste de leitura fria** (critério de aceitação, abaixo)
+1. `memoria instalar` cria a estrutura e detecta as linguagens do código
+2. lê integralmente os bytes das fontes e grava a cobertura SHA-256; o hash não prova semântica
+3. aplica a hierarquia fixa de evidências de `docs/politicas/AUTONOMIA.md`
+4. gera `PROJETO`, `ESTADO`, `ABERTO` e `GLOSSARIO` sem promoção humana
+5. usa `indeterminado` quando o repositório não demonstra um fato
+6. gera os derivados e congela a linha de base
+7. valida estrutura, política, cobertura, cadeia e catracas
+8. instala as verificações no CI
 
 Em projeto novo, o passo 4 é trivial — tudo é zero, e a régua vale integral desde o commit inicial.
 
 ### Fase 2 — Auditoria (só em projeto existente)
 
 Antes de promover qualquer coisa, **confira o acervo canônico contra o código**. Se ele mente, promover conteúdo para dentro dele só espalha o erro.
+
+`memoria documentar` prova quais bytes foram lidos e resolve os fatos mecânicos. Uma IA
+aprofunda sem pedir aprovação documental: segue a ordem de autoridade, ancora cada fato e
+registra como `indeterminado` aquilo cuja intenção não esteja demonstrada no repositório.
 
 O que sempre aparece: mapa de diretórios errado, documento de arquitetura descrevendo menos módulos do que existem, comandos documentados que não existem, e pastas vazias que alguém criou por um plano abandonado.
 
@@ -532,7 +548,7 @@ Fim de sessão, sempre:
 1. Entrada na cronologia
 2. `ESTADO.md` atualizado
 3. Divergências encontradas e não resolvidas na fila de arbitragem
-4. Se houver índice: reindexar e marcar
+4. sincronizar Hindsight e Graphify; os marcadores nascem somente após confirmação
 5. Validadores verdes
 
 ### Fase 5 — Evolução (contínua)
@@ -626,13 +642,16 @@ A primeira versão do validador de estrutura reprovava 112 documentos legados. B
 
 ## PARTE VIII — O que este método não resolve
 
-**Não faz ninguém escrever.** Ele garante que o que foi escrito não apodreça em silêncio; não gera conteúdo.
+**O motor determinístico não inventa semântica.** Ele gera estrutura e cobertura. A skill
+autônoma percorre as fontes, registra fatos sustentados e preserva esses registros entre
+execuções; fato sem prova continua `indeterminado`.
 
 **Não substitui teste.** Documento verificado é documento cujas âncoras existem e cuja estrutura é válida — não documento cujo conteúdo é verdadeiro.
 
 **Não impede decisão ruim.** Só garante que ela fique registrada com data e motivo, e que a próxima pessoa saiba que foi deliberada.
 
-**Não funciona sem alguém que se importe.** A catraca impede piorar; ela não melhora nada sozinha. Alguém precisa querer zerar os contadores.
+**Não funciona sem execução recorrente.** A catraca impede piorar; a skill e o CI fazem
+o ciclo sem arbitragem humana documental, mas precisam ser executados depois das mudanças.
 
 ---
 

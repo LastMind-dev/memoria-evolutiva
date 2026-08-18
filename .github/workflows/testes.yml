@@ -15,6 +15,25 @@ on:
   workflow_dispatch:
 
 jobs:
+  regressoes:
+    name: Regressões · ${{ matrix.os }} · Python ${{ matrix.python }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        python: ['3.10', '3.14']
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Instalar Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+
+      - name: Testes unitários e de regressão
+        run: python -m unittest discover -s tests -v
+
   fluxo-completo:
     name: Instalação e verificações num projeto sintético
     runs-on: ubuntu-latest
@@ -38,7 +57,7 @@ jobs:
           git -c user.email=ci@ci -c user.name=ci commit -m fixture
 
       - name: Instalar o padrão
-        run: cd /tmp/fixture && memoria instalar --projeto="fixture" --codigo=src
+        run: cd /tmp/fixture && memoria instalar --projeto="fixture" --codigo=src --sem-bancos
 
       - name: Gerar derivados e congelar a dívida
         run: |
@@ -49,9 +68,11 @@ jobs:
       - name: Bateria completa
         run: |
           cd /tmp/fixture
+          memoria skill
+          memoria skill --conferir
           memoria validar
           memoria catraca
-          memoria indice
+          memoria bancos status
           memoria autoteste
 
       - name: Protocolo neutro de extratores (o exemplo do repositório funciona)
@@ -64,4 +85,4 @@ jobs:
       - name: A árvore continua limpa depois de validar
         run: |
           cd /tmp/fixture && git add -A
-          git diff --cached --stat -- . ':!docs' ':!padrao.json' ':!.github' ':!AGENTS.md' ':!CLAUDE.md' ':!.cursor' ':!.windsurfrules' ':!scripts'
+          test -z "$(git diff --cached --name-only -- . ':!docs' ':!padrao.json' ':!.github' ':!AGENTS.md' ':!CLAUDE.md' ':!.cursor' ':!.windsurfrules' ':!scripts' ':!skill-memoria-evolutiva')"

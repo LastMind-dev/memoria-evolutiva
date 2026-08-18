@@ -1,0 +1,139 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://lastmind.dev/memoria-evolutiva/schemas/contexto-v2.schema.json",
+  "title": "Envelope neutro de contexto verificável com escopo",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema", "projeto", "pergunta", "perfil", "escopo", "cobertura", "frescor",
+    "orcamento_tokens", "tokens_estimados", "estrategias", "comparacao_sombra",
+    "fontes", "codigo", "avisos", "acoes_permitidas"
+  ],
+  "properties": {
+    "schema": { "const": 2 },
+    "projeto": { "type": "string", "minLength": 1 },
+    "pergunta": { "type": "string", "minLength": 1 },
+    "perfil": {
+      "enum": [
+        "atendimento", "automacao-codigo", "engenharia-documentacao",
+        "engenharia-leitura", "operacao-assistida"
+      ]
+    },
+    "escopo": {
+      "type": "object", "additionalProperties": false,
+      "required": ["produto", "tenant"],
+      "properties": {
+        "produto": { "$ref": "#/$defs/escopo" },
+        "tenant": { "$ref": "#/$defs/escopo" }
+      }
+    },
+    "cobertura": { "enum": ["confirmada", "ausente"] },
+    "frescor": { "enum": ["confirmado", "parcial"] },
+    "orcamento_tokens": { "type": "integer", "minimum": 64 },
+    "tokens_estimados": { "type": "integer", "minimum": 0 },
+    "estrategias": { "$ref": "#/$defs/estrategias" },
+    "comparacao_sombra": {
+      "type": "object", "additionalProperties": false,
+      "required": [
+        "documentos_semanticos", "fragmentos_ranqueados",
+        "fontes_documentais_entregues", "migracao_hindsight_liberada"
+      ],
+      "properties": {
+        "documentos_semanticos": { "type": "integer", "minimum": 0 },
+        "fragmentos_ranqueados": { "type": "integer", "minimum": 0 },
+        "fontes_documentais_entregues": { "type": "integer", "minimum": 0 },
+        "migracao_hindsight_liberada": { "const": false }
+      }
+    },
+    "fontes": { "type": "array", "items": { "$ref": "#/$defs/fonte" } },
+    "codigo": { "type": "array", "items": { "$ref": "#/$defs/codigo" } },
+    "avisos": { "type": "array", "items": { "type": "string" } },
+    "acoes_permitidas": { "type": "array", "maxItems": 0 }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "perfil": { "enum": ["atendimento", "operacao-assistida"] }
+        },
+        "required": ["perfil"]
+      },
+      "then": {
+        "properties": {
+          "escopo": {
+            "properties": {
+              "produto": { "type": "string", "pattern": "^[a-z0-9][a-z0-9._-]{0,63}$" },
+              "tenant": { "type": "string", "pattern": "^[a-z0-9][a-z0-9._-]{0,63}$" }
+            }
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "escopo": {
+      "type": ["string", "null"], "pattern": "^[a-z0-9][a-z0-9._-]{0,63}$"
+    },
+    "escopos": {
+      "type": "array", "uniqueItems": true,
+      "items": { "type": "string", "pattern": "^[a-z0-9][a-z0-9._-]{0,63}$" }
+    },
+    "perfis": {
+      "type": "array", "uniqueItems": true,
+      "items": {
+        "enum": [
+          "atendimento", "automacao-codigo", "engenharia-documentacao",
+          "engenharia-leitura", "operacao-assistida"
+        ]
+      }
+    },
+    "estrategias": {
+      "type": "array", "uniqueItems": true,
+      "items": { "enum": ["estrutural", "literal", "literal-codigo", "semantica"] }
+    },
+    "fonte": {
+      "type": "object", "additionalProperties": false,
+      "required": [
+        "source_uri", "source_commit", "source_sha256", "doc_id", "doc_tipo",
+        "status", "classificacao", "audience", "produtos", "tenants", "fragment_id",
+        "conteudo_sha256", "trecho", "truncado", "estrategias", "pontuacao"
+      ],
+      "properties": {
+        "source_uri": { "type": "string", "pattern": "^docs/.+#.+" },
+        "source_commit": { "type": ["string", "null"] },
+        "source_sha256": { "$ref": "#/$defs/sha256" },
+        "doc_id": { "type": "string", "minLength": 1 },
+        "doc_tipo": { "type": "string", "minLength": 1 },
+        "status": { "type": "string", "minLength": 1 },
+        "classificacao": { "enum": ["publico", "interno", "restrito"] },
+        "audience": { "$ref": "#/$defs/perfis" },
+        "produtos": { "$ref": "#/$defs/escopos" },
+        "tenants": { "$ref": "#/$defs/escopos" },
+        "fragment_id": { "type": "string", "minLength": 1 },
+        "conteudo_sha256": { "$ref": "#/$defs/sha256" },
+        "trecho": { "type": "string", "minLength": 1 },
+        "truncado": { "type": "boolean" },
+        "estrategias": { "$ref": "#/$defs/estrategias" },
+        "pontuacao": { "type": "number", "exclusiveMinimum": 0 }
+      }
+    },
+    "codigo": {
+      "type": "object", "additionalProperties": false,
+      "required": [
+        "source_uri", "source_sha256", "no_id", "trecho", "estrategias",
+        "conteudo_sha256", "truncado", "pontuacao"
+      ],
+      "properties": {
+        "source_uri": { "type": "string", "pattern": "#L[1-9][0-9]*$" },
+        "source_sha256": { "$ref": "#/$defs/sha256" },
+        "no_id": { "type": ["string", "null"] },
+        "trecho": { "type": "string", "minLength": 1 },
+        "estrategias": { "$ref": "#/$defs/estrategias" },
+        "conteudo_sha256": { "$ref": "#/$defs/sha256" },
+        "truncado": { "type": "boolean" },
+        "pontuacao": { "type": "number", "exclusiveMinimum": 0 }
+      }
+    }
+  }
+}

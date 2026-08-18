@@ -1,0 +1,198 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://lastmind.dev/memoria-evolutiva/schemas/manifesto-avaliacao-rag-v1.schema.json",
+  "title": "Manifesto reconstruível da avaliação RAG",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema", "projeto", "corpus_sha256", "perfil_rag", "metricas", "drift",
+    "gate", "promocoes_candidatas", "relatorio_sha256", "assinatura"
+  ],
+  "properties": {
+    "schema": { "const": 1 },
+    "projeto": { "type": "string", "minLength": 1 },
+    "corpus_sha256": { "$ref": "#/$defs/sha256" },
+    "perfil_rag": { "$ref": "#/$defs/perfil_rag" },
+    "metricas": { "$ref": "#/$defs/metricas" },
+    "drift": { "$ref": "#/$defs/drift" },
+    "gate": { "$ref": "#/$defs/gate" },
+    "promocoes_candidatas": {
+      "type": "array", "items": { "$ref": "#/$defs/promocao" }
+    },
+    "relatorio_sha256": { "$ref": "#/$defs/sha256" },
+    "assinatura": { "$ref": "#/$defs/sha256" }
+  },
+  "$defs": {
+    "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "fracao": { "type": "number", "minimum": 0, "maximum": 1 },
+    "fracao_nula": {
+      "anyOf": [{ "$ref": "#/$defs/fracao" }, { "type": "null" }]
+    },
+    "delta_nulo": {
+      "anyOf": [
+        { "type": "number", "minimum": -1, "maximum": 1 },
+        { "type": "null" }
+      ]
+    },
+    "textos": {
+      "type": "array", "uniqueItems": true,
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "perfil_nome": {
+      "enum": [
+        "engenharia-leitura", "engenharia-documentacao", "automacao-codigo",
+        "atendimento", "operacao-assistida"
+      ]
+    },
+    "perfil_rag": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["algoritmo", "perfil_fingerprint", "embedding_provedor", "embedding_modelo"],
+      "properties": {
+        "algoritmo": { "type": "string", "minLength": 1 },
+        "perfil_fingerprint": { "$ref": "#/$defs/sha256" },
+        "embedding_provedor": { "type": "string", "minLength": 1 },
+        "embedding_modelo": { "type": "string", "minLength": 1 }
+      }
+    },
+    "grupo_metricas": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "casos", "positivos", "negativos", "hit_1", "hit_3",
+        "cobertura_citacao", "cobertura_resposta", "sem_fonte", "negativos_ok"
+      ],
+      "properties": {
+        "casos": { "type": "integer", "minimum": 0 },
+        "positivos": { "type": "integer", "minimum": 0 },
+        "negativos": { "type": "integer", "minimum": 0 },
+        "hit_1": { "$ref": "#/$defs/fracao_nula" },
+        "hit_3": { "$ref": "#/$defs/fracao_nula" },
+        "cobertura_citacao": { "$ref": "#/$defs/fracao_nula" },
+        "cobertura_resposta": { "$ref": "#/$defs/fracao_nula" },
+        "sem_fonte": { "$ref": "#/$defs/fracao_nula" },
+        "negativos_ok": { "$ref": "#/$defs/fracao_nula" }
+      }
+    },
+    "por_perfil": {
+      "type": "object", "minProperties": 3,
+      "propertyNames": { "$ref": "#/$defs/perfil_nome" },
+      "additionalProperties": { "$ref": "#/$defs/grupo_metricas" }
+    },
+    "por_categoria": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["engenharia", "atendimento", "automacao"],
+      "properties": {
+        "engenharia": { "$ref": "#/$defs/grupo_metricas" },
+        "atendimento": { "$ref": "#/$defs/grupo_metricas" },
+        "automacao": { "$ref": "#/$defs/grupo_metricas" }
+      }
+    },
+    "metricas": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["global", "por_perfil", "por_categoria"],
+      "properties": {
+        "global": { "$ref": "#/$defs/grupo_metricas" },
+        "por_perfil": { "$ref": "#/$defs/por_perfil" },
+        "por_categoria": { "$ref": "#/$defs/por_categoria" }
+      }
+    },
+    "promocao": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["fonte", "casos", "hits_3"],
+      "properties": {
+        "fonte": { "type": "string", "minLength": 1 },
+        "casos": { "$ref": "#/$defs/textos" },
+        "hits_3": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "mudanca_componente": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["anterior", "atual", "alterado"],
+      "properties": {
+        "anterior": { "type": ["string", "null"] },
+        "atual": { "type": ["string", "null"] },
+        "alterado": { "type": "boolean" }
+      }
+    },
+    "deltas": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "hit_1", "hit_3", "cobertura_citacao", "cobertura_resposta",
+        "negativos_ok", "sem_fonte"
+      ],
+      "properties": {
+        "hit_1": { "$ref": "#/$defs/delta_nulo" },
+        "hit_3": { "$ref": "#/$defs/delta_nulo" },
+        "cobertura_citacao": { "$ref": "#/$defs/delta_nulo" },
+        "cobertura_resposta": { "$ref": "#/$defs/delta_nulo" },
+        "negativos_ok": { "$ref": "#/$defs/delta_nulo" },
+        "sem_fonte": { "$ref": "#/$defs/delta_nulo" }
+      }
+    },
+    "drift": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "baseline_sha256", "perfil_rag_alterado", "componentes_rag", "global", "por_perfil"
+      ],
+      "properties": {
+        "baseline_sha256": {
+          "anyOf": [{ "$ref": "#/$defs/sha256" }, { "type": "null" }]
+        },
+        "perfil_rag_alterado": { "type": "boolean" },
+        "componentes_rag": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "algoritmo", "perfil_fingerprint", "embedding_provedor", "embedding_modelo"
+          ],
+          "properties": {
+            "algoritmo": { "$ref": "#/$defs/mudanca_componente" },
+            "perfil_fingerprint": { "$ref": "#/$defs/mudanca_componente" },
+            "embedding_provedor": { "$ref": "#/$defs/mudanca_componente" },
+            "embedding_modelo": { "$ref": "#/$defs/mudanca_componente" }
+          }
+        },
+        "global": { "$ref": "#/$defs/deltas" },
+        "por_perfil": {
+          "type": "object",
+          "propertyNames": { "$ref": "#/$defs/perfil_nome" },
+          "additionalProperties": { "$ref": "#/$defs/deltas" }
+        }
+      }
+    },
+    "limites": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "hit_1", "hit_3", "cobertura_citacao", "cobertura_resposta",
+        "negativos_ok", "sem_fonte"
+      ],
+      "properties": {
+        "hit_1": { "$ref": "#/$defs/fracao" },
+        "hit_3": { "$ref": "#/$defs/fracao" },
+        "cobertura_citacao": { "$ref": "#/$defs/fracao" },
+        "cobertura_resposta": { "$ref": "#/$defs/fracao" },
+        "negativos_ok": { "$ref": "#/$defs/fracao" },
+        "sem_fonte": { "$ref": "#/$defs/fracao" }
+      }
+    },
+    "gate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["aprovado", "limites", "regressao_maxima", "erros"],
+      "properties": {
+        "aprovado": { "type": "boolean" },
+        "limites": { "$ref": "#/$defs/limites" },
+        "regressao_maxima": { "$ref": "#/$defs/fracao" },
+        "erros": { "type": "array", "items": { "type": "string", "minLength": 1 } }
+      }
+    }
+  }
+}

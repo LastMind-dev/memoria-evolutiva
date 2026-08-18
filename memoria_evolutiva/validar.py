@@ -16,10 +16,12 @@ declaradas em `externos` (outro dono, outro formato).
 
 from __future__ import annotations
 
-import subprocess
-import sys
+import contextlib
+import io
+import tempfile
 from pathlib import Path
 
+from . import gerar, seguranca
 from .lib import (acervo, comeca_com, config, frontmatter, hash_do_conteudo,
                   markdowns, raiz, relativo, titulo)
 
@@ -42,6 +44,185 @@ def main() -> int:
 
     arquivos = markdowns(acervo())
 
+    autonomia = c.get("autonomia", {})
+    if autonomia.get("ativo"):
+        if autonomia.get("revisao_humana_obrigatoria") is not False:
+            erros.append(
+                "padrao.json: autonomia ativa exige `revisao_humana_obrigatoria: false`"
+            )
+        if autonomia.get("sem_evidencia") != "indeterminado":
+            erros.append(
+                "padrao.json: autonomia ativa exige `sem_evidencia: indeterminado`"
+            )
+        politica = str(autonomia.get("politica") or "")
+        if not politica or not (Path(raiz()) / politica).is_file():
+            erros.append(
+                "padrao.json: política autônoma ausente; rode `memoria documentar`"
+            )
+        if "cobertura-codigo" not in c.get("gerado", {}).get("extratores", []):
+            erros.append(
+                "padrao.json: autonomia exige o extrator `cobertura-codigo`"
+            )
+
+    memoria = c.get("memoria", {})
+    grafo = c.get("grafo", {})
+    if bool(memoria.get("ativo")) != bool(grafo.get("ativo")):
+        erros.append("padrao.json: Hindsight e Graphify devem estar ambos ativos ou ambos desativados")
+    if memoria.get("ativo"):
+        if memoria.get("obrigatorio") is not True:
+            erros.append("padrao.json: Hindsight ativo exige `memoria.obrigatorio: true`")
+        if memoria.get("ferramenta") != "hindsight" or memoria.get("modo") != "local":
+            erros.append("padrao.json: o banco documental padrão é `hindsight` em modo `local`")
+        if not memoria.get("endpoint") or not memoria.get("banco"):
+            erros.append("padrao.json: Hindsight exige `endpoint` e `banco`")
+    if grafo.get("ativo"):
+        if grafo.get("obrigatorio") is not True:
+            erros.append("padrao.json: Graphify ativo exige `grafo.obrigatorio: true`")
+        if grafo.get("ferramenta") != "graphify" or grafo.get("modo") != "local":
+            erros.append("padrao.json: o grafo de código padrão é `graphify` em modo `local`")
+        if not grafo.get("comando") or not grafo.get("arquivo") or not grafo.get("marcador"):
+            erros.append("padrao.json: Graphify exige `comando`, `arquivo` e `marcador`")
+
+    contexto = c.get("contexto", {})
+    if contexto:
+        for chave, padrao, minimo, maximo in (
+            ("max_tokens", 2048, 64, 32768),
+            ("max_fontes", 8, 1, 100),
+            ("max_codigo", 5, 0, 100),
+            ("http_porta", 8765, 0, 65535),
+        ):
+            valor = contexto.get(chave, padrao)
+            if isinstance(valor, bool) or not isinstance(valor, int) or not minimo <= valor <= maximo:
+                erros.append(
+                    f"padrao.json: `contexto.{chave}` precisa ser inteiro entre "
+                    f"{minimo} e {maximo}"
+                )
+        if contexto.get("http_host", "127.0.0.1") not in {
+            "127.0.0.1", "localhost", "::1",
+        }:
+            erros.append("padrao.json: `contexto.http_host` aceita somente loopback")
+
+    politica_segura = c.get("seguranca_memoria", {})
+    esperado_seguro = {
+        "ativo": True,
+        "classificacao_padrao": "interno",
+        "nao_indexar": ["secreto-nao-indexar"],
+        "escopo": "produto-tenant-exato-v1",
+        "perfis_com_escopo_obrigatorio": ["atendimento", "operacao-assistida"],
+        "redaction_antes_retain": True,
+        "redaction_algoritmo": "redaction-deterministica-v1",
+    }
+    if not isinstance(politica_segura, dict):
+        erros.append("padrao.json: `seguranca_memoria` precisa ser objeto")
+    else:
+        for chave, valor in esperado_seguro.items():
+            if politica_segura.get(chave) != valor:
+                erros.append(
+                    f"padrao.json: `seguranca_memoria.{chave}` precisa ser "
+                    f"{valor!r} na Fase 4"
+                )
+
+    adaptadores = c.get("adaptadores", {})
+    if adaptadores:
+        plataformas_validas = {"codex", "claude", "cursor", "windsurf", "hermes"}
+        plataformas = adaptadores.get("plataformas")
+        if (not isinstance(plataformas, list) or not plataformas
+                or any(not isinstance(item, str) for item in plataformas)
+                or len(set(plataformas)) != len(plataformas)
+                or any(item not in plataformas_validas for item in plataformas)):
+            erros.append("padrao.json: `adaptadores.plataformas` precisa listar clientes válidos sem duplicatas")
+        perfil = adaptadores.get("perfil_canary")
+        from .contexto import PERFIS
+        if perfil not in PERFIS:
+            erros.append("padrao.json: `adaptadores.perfil_canary` precisa ser perfil válido")
+        manifesto_adaptadores = adaptadores.get("manifesto")
+        if not isinstance(manifesto_adaptadores, str) or not manifesto_adaptadores.endswith(".json"):
+            erros.append("padrao.json: `adaptadores.manifesto` precisa ser caminho JSON")
+
+    executor = c.get("executor", {})
+    contrato_executor = {
+        "ativo": True,
+        "estado": ".memoria/executor",
+        "isolamento": "git-worktree-branch-v1",
+        "mutacao_externa_padrao": "negada",
+        "publicacao_automatica": False,
+    }
+    if not isinstance(executor, dict):
+        erros.append("padrao.json: `executor` precisa ser objeto")
+    else:
+        for chave, valor in contrato_executor.items():
+            if executor.get(chave) != valor:
+                erros.append(
+                    f"padrao.json: `executor.{chave}` precisa ser {valor!r} na Fase 5"
+                )
+        for chave, padrao, minimo, maximo in (
+            ("timeout_global_segundos", 900, 1, 86400),
+            ("max_tentativas", 3, 1, 10),
+            ("backoff_segundos", 1, 0, 300),
+            ("lock_expira_segundos", 1200, 30, 172800),
+        ):
+            valor = executor.get(chave, padrao)
+            if (isinstance(valor, bool) or not isinstance(valor, int)
+                    or not minimo <= valor <= maximo):
+                erros.append(
+                    f"padrao.json: `executor.{chave}` precisa ser inteiro entre "
+                    f"{minimo} e {maximo}"
+                )
+        timeout_executor = executor.get("timeout_global_segundos", 900)
+        expira_executor = executor.get("lock_expira_segundos", 1200)
+        if (isinstance(timeout_executor, int) and not isinstance(timeout_executor, bool)
+                and isinstance(expira_executor, int) and not isinstance(expira_executor, bool)
+                and expira_executor <= timeout_executor):
+            erros.append(
+                "padrao.json: `executor.lock_expira_segundos` precisa superar o timeout global"
+            )
+        capacidades = executor.get("capacidades_permitidas", [])
+        if (not isinstance(capacidades, list)
+                or any(not isinstance(item, str) for item in capacidades)
+                or len(capacidades) != len(set(capacidades))
+                or set(capacidades) - {"sincronizar-bancos"}):
+            erros.append(
+                "padrao.json: `executor.capacidades_permitidas` aceita somente "
+                "`sincronizar-bancos`, sem duplicatas"
+            )
+
+    avaliacao = c.get("avaliacao", {})
+    contrato_avaliacao = {
+        "ativo": True,
+        "corpus": "docs/avaliacao/casos-rag-v1.json",
+        "baseline": "docs/politicas/baseline-rag-v1.json",
+        "relatorio": "docs/gerado/relatorio-avaliacao-rag-v1.json",
+        "manifesto": "docs/gerado/manifesto-avaliacao-rag-v1.json",
+    }
+    if not isinstance(avaliacao, dict):
+        erros.append("padrao.json: `avaliacao` precisa ser objeto")
+    else:
+        for chave, valor in contrato_avaliacao.items():
+            if avaliacao.get(chave) != valor:
+                erros.append(
+                    f"padrao.json: `avaliacao.{chave}` precisa ser {valor!r} na Fase 6"
+                )
+        for chave, padrao in (
+            ("min_hit_1", 0.5), ("min_hit_3", 1.0),
+            ("min_cobertura_citacao", 1.0), ("min_cobertura_resposta", 1.0),
+            ("max_sem_fonte", 0.0), ("min_negativos_ok", 1.0),
+            ("regressao_maxima", 0.0),
+        ):
+            valor = avaliacao.get(chave, padrao)
+            if (isinstance(valor, bool) or not isinstance(valor, (int, float))
+                    or not 0 <= float(valor) <= 1):
+                erros.append(
+                    f"padrao.json: `avaliacao.{chave}` precisa ser número entre 0 e 1"
+                )
+        usos = avaliacao.get("min_usos_promocao", 2)
+        if isinstance(usos, bool) or not isinstance(usos, int) or not 1 <= usos <= 100:
+            erros.append(
+                "padrao.json: `avaliacao.min_usos_promocao` precisa ser inteiro entre 1 e 100"
+            )
+        corpus = Path(raiz()) / str(avaliacao.get("corpus") or "")
+        if not corpus.is_file():
+            erros.append("padrao.json: corpus de avaliação ausente; rode `memoria instalar`")
+
     for f in arquivos:
         rel = relativo(f)
         if comeca_com(rel, ignorar):
@@ -50,13 +231,28 @@ def main() -> int:
             fora_da_regua.append(rel)
             continue
 
-        fm = frontmatter(Path(f).read_text(encoding="utf-8"))
+        texto_documento = Path(f).read_text(encoding="utf-8")
+        fm = frontmatter(texto_documento)
 
         # DOCUMENTO SEM FRONTMATTER É DÍVIDA, NÃO ERRO — reprovar o passivo deixa o
         # build vermelho desde o dia um, e build que nasce vermelho ninguém olha.
         if fm is None:
             legados.append(rel)
             continue
+
+        nucleo_gerenciado = {
+            f"{c['acervos']['canonico'].strip('/')}/{nome}"
+            for nome in ("PROJETO.md", "ESTADO.md", "ABERTO.md", "GLOSSARIO.md")
+        }
+        if fm.get("gerenciado_por") == "memoria-documentar" and rel in nucleo_gerenciado:
+            inicio = "<!-- memoria-evolutiva:inicio -->"
+            fim = "<!-- memoria-evolutiva:fim -->"
+            if (texto_documento.count(inicio) != 1 or texto_documento.count(fim) != 1
+                    or texto_documento.index(inicio) > texto_documento.index(fim)):
+                erros.append(
+                    f"{rel}: bloco evolutivo ausente, duplicado ou invertido. "
+                    "Rode `memoria documentar` para reparar sem perder a cópia anterior."
+                )
 
         for campo in vocab.get("obrigatorios", []):
             if not fm.get(campo):
@@ -76,6 +272,15 @@ def main() -> int:
         if "status" in fm and fm["status"] not in vocab.get("status", []):
             erros.append(f"{rel}: status `{fm['status']}` fora do vocabulário")
 
+        try:
+            acesso = seguranca.metadados(fm)
+        except seguranca.SegurancaErro as exc:
+            erros.append(f"{rel}: política de acesso inválida — {exc}")
+            acesso = None
+        if (acesso is not None and acesso["classificacao"] == "publico"
+                and fm.get("classificacao") != "publico"):
+            erros.append(f"{rel}: documento público precisa declarar `classificacao: publico`")
+
         if fm.get("id"):
             if fm["id"] in ids_vistos:
                 erros.append(f"{rel}: id `{fm['id']}` duplicado (também em {ids_vistos[fm['id']]})")
@@ -93,30 +298,72 @@ def main() -> int:
 
         if fm.get("status") == "verificado" and not fm.get("verificado_commit"):
             avisos.append(f"{rel}: `status: verificado` sem `verificado_commit`")
+        if (autonomia.get("ativo") and fm.get("status") == "verificado"
+                and fm.get("tipo") != "gerado" and not ancoras):
+            erros.append(
+                f"{rel}: documento verificado sem `ancoras` no modo autônomo"
+            )
 
     # ------------------------------------------------------- 5: derivados vivos
     dir_gerado = Path(raiz()) / c["gerado"].get("diretorio", "").strip("/")
-    if dir_gerado.is_dir():
-        antes = {g.name: g.read_text(encoding="utf-8") for g in sorted(dir_gerado.glob("*.md"))}
+    atuais = ({g.name: g.read_text(encoding="utf-8")
+               for g in sorted(dir_gerado.glob("*.md"))}
+              if dir_gerado.is_dir() else {})
 
-        # O GERADOR ESCREVE; PRECISAMOS DESFAZER. Reexecutar é a única forma honesta de
-        # saber se a saída commitada corresponde ao código de hoje — mas verificação que
-        # altera o que verifica não é verificação, então a árvore volta ao que era.
-        r = subprocess.run([sys.executable, "-m", "memoria_evolutiva", "gerar"],
-                           capture_output=True, text=True, cwd=raiz())
-        if r.returncode != 0:
-            saida = (r.stderr or r.stdout).strip().splitlines()[:3]
-            erros.append("o gerador falhou: " + " | ".join(saida))
+    # Gerar na própria árvore e tentar desfazer deixou duas frestas reais: derivado
+    # ausente era criado e aprovado, e arquivo novo produzido antes de uma falha ficava
+    # para trás. A saída esperada nasce numa pasta temporária; a árvore validada é
+    # somente leitura para o motor embutido.
+    with tempfile.TemporaryDirectory(prefix="validar-memoria-") as tmp:
+        esperado_dir = Path(tmp) / "gerado"
+        stderr = io.StringIO()
+        try:
+            with contextlib.redirect_stderr(stderr):
+                rc_gerar = gerar.main(saida_override=esperado_dir, silencioso=True)
+        except SystemExit as e:
+            rc_gerar = int(e.code) if isinstance(e.code, int) else 2
+
+        if rc_gerar != 0:
+            saida = stderr.getvalue().strip().splitlines()[:3]
+            erros.append("o gerador falhou: " + " | ".join(saida or [f"saída {rc_gerar}"]))
         else:
-            for nome, conteudo in antes.items():
-                agora = (dir_gerado / nome).read_text(encoding="utf-8") if (dir_gerado / nome).exists() else ""
-                if hash_do_conteudo(conteudo) != hash_do_conteudo(agora):
+            esperados = {
+                g.name: g.read_text(encoding="utf-8")
+                for g in sorted(esperado_dir.glob("*.md"))
+            }
+            faltando = sorted(set(esperados) - set(atuais))
+            sobrando = sorted(set(atuais) - set(esperados))
+
+            for nome in faltando:
+                erros.append(
+                    f"{c['gerado']['diretorio']}/{nome}: derivado ausente. "
+                    "Rode `memoria gerar` e commite a saída."
+                )
+            for nome in sobrando:
+                erros.append(
+                    f"{c['gerado']['diretorio']}/{nome}: derivado sem extrator declarado. "
+                    "Remova-o ou declare o extrator correspondente em `padrao.json`."
+                )
+            for nome in sorted(set(atuais) & set(esperados)):
+                if hash_do_conteudo(atuais[nome]) != hash_do_conteudo(esperados[nome]):
                     erros.append(
                         f"{c['gerado']['diretorio']}/{nome}: desatualizado ou editado à mão. "
                         "Rode `memoria gerar` e commite a saída."
                     )
-        for nome, conteudo in antes.items():
-            (dir_gerado / nome).write_text(conteudo, encoding="utf-8")
+
+    if autonomia.get("ativo"):
+        # A política de decisão é parte do motor, não uma preferência do projeto. Se ela
+        # for alterada à mão, duas IAs podem tomar decisões opostas com build verde.
+        from . import documentar
+        rel_politica = str(autonomia.get("politica"))
+        politica_atual = Path(raiz()) / rel_politica
+        politica_esperada = documentar._documentos()["politicas/AUTONOMIA.md"]
+        if (politica_atual.is_file()
+                and hash_do_conteudo(politica_atual.read_text(encoding="utf-8"))
+                != hash_do_conteudo(politica_esperada)):
+            erros.append(
+                f"{rel_politica}: política autônoma alterada. Rode `memoria documentar`."
+            )
 
     # ------------------------------------------------------- 7: cadeia de origem
     # `deriva_de` = "de quem eu dependo — se algum cair, eu preciso ser revisto".
