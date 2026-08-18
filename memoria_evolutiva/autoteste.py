@@ -249,39 +249,51 @@ def main() -> int:
     passou = falhou = pulados = 0
     relatos: list[tuple[str, str, str]] = []
 
-    for t in testes:
-        if not t.get("aplica", True):
-            pulados += 1
-            relatos.append(("·", t["nome"], "não se aplica a este projeto"))
-            continue
+    # A cópia deliberadamente não leva `.git` nem dependências. Refaça uma vez os
+    # derivados dependentes da raiz/commit e os adaptadores com caminho absoluto; sem
+    # essa preparação, um projeto Git com `vendor/` falha intacto e cria falso positivo.
+    with tempfile.TemporaryDirectory(prefix="autoteste-base-") as base_s:
+        base = Path(base_s) / "projeto"
+        _copiar(origem, base)
+        for cmd in ("gerar", "adaptadores gerar"):
+            rc_base, saida_base = _rodar(base, cmd)
+            if rc_base != 0:
+                print(f"\nNão foi possível preparar a cópia-base com `{cmd}`:\n{saida_base}")
+                return 1
 
-        with tempfile.TemporaryDirectory(prefix="autoteste-memoria-") as tmp_s:
-            tmp = Path(tmp_s) / "projeto"
-            _copiar(origem, tmp)
-            t["quebra"](tmp)
+        for t in testes:
+            if not t.get("aplica", True):
+                pulados += 1
+                relatos.append(("·", t["nome"], "não se aplica a este projeto"))
+                continue
 
-            comandos = ([t["comando"]] if t["comando"]
-                        else ["validar", "catraca", "bancos status --offline",
-                              "avaliar verificar"])
-            rc_final, saida_final = 0, ""
-            for cmd in comandos:
-                rc, saida = _rodar(tmp, cmd)
-                saida_final += saida
-                if rc != 0:
-                    rc_final = rc
+            with tempfile.TemporaryDirectory(prefix="autoteste-memoria-") as tmp_s:
+                tmp = Path(tmp_s) / "projeto"
+                _copiar(base, tmp)
+                t["quebra"](tmp)
 
-        ok_codigo = (rc_final != 0) if t["esperado"] == 1 else (rc_final == 0)
-        ok_texto = t["contem"] is None or t["contem"] in saida_final
+                comandos = ([t["comando"]] if t["comando"]
+                            else ["validar", "catraca", "bancos status --offline",
+                                  "avaliar verificar"])
+                rc_final, saida_final = 0, ""
+                for cmd in comandos:
+                    rc, saida = _rodar(tmp, cmd)
+                    saida_final += saida
+                    if rc != 0:
+                        rc_final = rc
 
-        if ok_codigo and ok_texto:
-            passou += 1
-            relatos.append(("✔", t["nome"], ""))
-        else:
-            falhou += 1
-            motivo = ("deveria reprovar e não reprovou" if t["esperado"] == 1 and not ok_codigo
-                      else f"reprovou e não deveria (saída {rc_final})" if not ok_codigo
-                      else f"reprovou, mas a mensagem não menciona `{t['contem']}`")
-            relatos.append(("✘", t["nome"], motivo))
+            ok_codigo = (rc_final != 0) if t["esperado"] == 1 else (rc_final == 0)
+            ok_texto = t["contem"] is None or t["contem"] in saida_final
+
+            if ok_codigo and ok_texto:
+                passou += 1
+                relatos.append(("✔", t["nome"], ""))
+            else:
+                falhou += 1
+                motivo = ("deveria reprovar e não reprovou" if t["esperado"] == 1 and not ok_codigo
+                          else f"reprovou e não deveria (saída {rc_final})" if not ok_codigo
+                          else f"reprovou, mas a mensagem não menciona `{t['contem']}`")
+                relatos.append(("✘", t["nome"], motivo))
 
     for sinal, nome, obs in relatos:
         print(f"  {sinal}  {nome}" + (f"\n        → {obs}" if obs else ""))

@@ -405,6 +405,13 @@ class CliEmProjetoTemporario(unittest.TestCase):
                 self.assertEqual(carimbo, depois["checkpoints"][checkpoint]["concluido_em"])
 
     def test_fluxo_completo_e_autoteste_nao_alteram_projeto(self) -> None:
+        vendor = self.projeto / "vendor"
+        vendor.mkdir()
+        (vendor / "dependencia.php").write_text("<?php return true;\n", encoding="utf-8")
+        self.preparar_git()
+        documentar = self.cli("documentar")
+        self.assertEqual(0, documentar.returncode, documentar.stdout + documentar.stderr)
+
         def fotografia() -> dict[str, bytes]:
             return {
                 str(arquivo.relative_to(self.projeto)): arquivo.read_bytes()
