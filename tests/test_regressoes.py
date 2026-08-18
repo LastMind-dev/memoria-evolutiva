@@ -1456,6 +1456,8 @@ class BancosLocaisTest(unittest.TestCase):
         persistido: dict[str, str] = {}
         self.estado_hindsight = {"memory_unit_count": 1}
         estado_hindsight = self.estado_hindsight
+        self.texto_recall = "memória encontrada"
+        teste = self
 
         class Handler(BaseHTTPRequestHandler):
             def do_POST(self) -> None:  # noqa: N802 - contrato de BaseHTTPRequestHandler
@@ -1467,7 +1469,7 @@ class BancosLocaisTest(unittest.TestCase):
                         persistido[item["document_id"]] = item["content"]
                 corpo = (
                     {"results": [{
-                        "text": "memória encontrada",
+                        "text": teste.texto_recall,
                         "metadata": {"source_uri": "docs/PROJETO.md"},
                         "document_id": "memoria-evolutiva:banco-fixture:docs/PROJETO.md",
                     }]}
@@ -1613,6 +1615,25 @@ class BancosLocaisTest(unittest.TestCase):
         self.assertIn("vigente", self.requisicoes[-1][1]["tags"])
         self.assertIn("memória encontrada", consulta.stdout)
         self.assertIn("executar -> retorno", consulta.stdout)
+
+    def test_sinal_semantico_generico_nao_expulsa_match_literal_exato(self) -> None:
+        sincronizar = self.cli("bancos", "sincronizar")
+        self.texto_recall = (self.projeto / "docs/PROJETO.md").read_text(encoding="utf-8")
+        contexto_cli = self.cli(
+            "contexto",
+            "--pergunta=como a execução por cron isola a documentação com checkpoints e worktree?",
+            "--perfil=automacao-codigo",
+            "--json",
+        )
+
+        self.assertEqual(0, sincronizar.returncode, sincronizar.stdout + sincronizar.stderr)
+        self.assertEqual(0, contexto_cli.returncode, contexto_cli.stdout + contexto_cli.stderr)
+        envelope = json.loads(contexto_cli.stdout)
+        self.assertTrue(envelope["fontes"])
+        self.assertTrue(envelope["fontes"][0]["source_uri"].startswith(
+            "docs/runbooks/documentacao-autonoma.md#execução-por-cron"
+        ))
+        self.assertIn("literal", envelope["fontes"][0]["estrategias"])
 
     def test_retain_redige_dados_e_exclui_documento_secreto_antes_do_envio(self) -> None:
         (self.projeto / "docs/funcional/FDD-DADOS.md").write_text(
@@ -2123,6 +2144,30 @@ class ArtefatosDistribuidosTest(unittest.TestCase):
             texto = workflow.read_text(encoding="utf-8")
             self.assertIn("run: pip install memoria-evolutiva==6.0.0", texto)
             self.assertNotIn("==5.0.0", texto)
+            self.assertTrue(ajustados)
+
+    def test_workflow_instalado_atualiza_pin_oficial_para_o_commit_atual(self) -> None:
+        from memoria_evolutiva import instalar
+
+        with tempfile.TemporaryDirectory(prefix="teste-workflow-sha-") as tmp:
+            workflow = Path(tmp) / ".github/workflows/documentacao.yml"
+            workflow.parent.mkdir(parents=True)
+            workflow.write_text(
+                "steps:\n  - name: pacote\n    run: pip install "
+                "git+https://github.com/LastMind-dev/memoria-evolutiva.git@"
+                + "a" * 40 + "\n",
+                encoding="utf-8",
+            )
+            origem = (
+                "git+https://github.com/LastMind-dev/memoria-evolutiva.git@" + "b" * 40
+            )
+            ajustados: list[str] = []
+            with mock.patch.object(instalar, "_origem_imutavel_ci", return_value=origem):
+                instalar._fixar_workflow(tmp, ajustados)
+
+            texto = workflow.read_text(encoding="utf-8")
+            self.assertIn("run: pip install " + origem, texto)
+            self.assertNotIn("@" + "a" * 40, texto)
             self.assertTrue(ajustados)
 
     def test_origem_ci_nao_propaga_credencial_embutida(self) -> None:

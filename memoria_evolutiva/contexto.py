@@ -82,11 +82,14 @@ def _pontuacao(pergunta: str, texto: str) -> float:
     consulta = _tokens(pergunta)
     if not consulta:
         return 0.0
+    unicos = set(consulta)
     normalizado = _normalizar(texto)
-    presentes = sum(1 for token in set(consulta) if token in normalizado)
-    frequencia = sum(min(normalizado.count(token), 3) for token in set(consulta))
+    presentes = sum(1 for token in unicos if token in normalizado)
+    # A consulta também pode vir de um chunk semântico inteiro. Sem normalização, cada
+    # termo adicional aumenta o score e um documento longo domina uma pergunta curta.
+    frequencia = sum(min(normalizado.count(token), 3) for token in unicos) / len(unicos)
     frase = 6.0 if _normalizar(pergunta) in normalizado else 0.0
-    return frase + 4.0 * presentes / len(set(consulta)) + 0.25 * frequencia
+    return frase + 4.0 * presentes / len(unicos) + 0.25 * frequencia
 
 
 def _permitido(fragmento: dict, perfil: str,
@@ -156,8 +159,13 @@ def _sinais_semanticos(
         if not origem:
             sem_origem += 1
             continue
+        # O Hindsight participa como sinal em modo sombra: ajuda a desempatar, mas não
+        # pode expulsar uma correspondência literal forte por causa de um recall
+        # genérico. A escala lexical chega a 10,75; manter cada metade do bônus
+        # semântico em até 0,25 preserva a fonte exata e ainda promove documentos sem
+        # match textual direto.
         sinais.setdefault(origem, []).append((
-            8.0 / (ordem + 1), str(resultado.get("text") or "")
+            0.25 / (ordem + 1), str(resultado.get("text") or "")
         ))
     avisos = []
     if sem_origem:
@@ -448,7 +456,7 @@ def construir(pergunta: object, perfil: object, max_tokens: int | None = None,
         rel = item["source_uri"].split("#", 1)[0]
         if rel in sinais:
             item["_score"] += max(
-                base + _pontuacao(fato, item["texto"])
+                base + min(0.25, 0.25 * _pontuacao(fato, item["texto"]) / 10.75)
                 for base, fato in sinais[rel]
             )
             item["_estrategias"].append("semantica")

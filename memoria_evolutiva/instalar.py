@@ -90,6 +90,16 @@ def _fixar_workflow(raiz_: str, ajustados: list[str]) -> None:
     novo = novo.replace(
         "git+https://github.com/LastMind-dev/memoria-evolutiva.git@main", origem
     )
+    # Atualiza somente o pin oficial, em uma etapa `run: pip install` distribuída. Isso
+    # mantém o CI no mesmo commit do pacote recém-instalado sem reescrever URLs, forks
+    # ou comandos personalizados do projeto.
+    novo = re.sub(
+        r"(?m)^(\s*run:\s+pip install )"
+        r"git\+https://github\.com/LastMind-dev/memoria-evolutiva\.git@[0-9a-fA-F]{40}"
+        r"(\s*)$",
+        lambda match: match.group(1) + origem + match.group(2),
+        novo,
+    )
     # Migra somente o pin na linha distribuída. Um uso da biblioteca em outro comando
     # ou texto documental não é alterado por coincidência.
     novo = re.sub(
