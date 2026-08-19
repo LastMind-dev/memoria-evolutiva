@@ -85,4 +85,8 @@ jobs:
       - name: A árvore continua limpa depois de validar
         run: |
           cd /tmp/fixture && git add -A
-          test -z "$(git diff --cached --name-only -- . ':!.gitignore' ':!docs' ':!padrao.json' ':!.github' ':!AGENTS.md' ':!CLAUDE.md' ':!.cursor' ':!.windsurfrules' ':!scripts' ':!skill-memoria-evolutiva')"
+          inesperados="$(git diff --cached --name-only -- . ':!.codex' ':!.cursor' ':!.github' ':!.gitignore' ':!.hermes.md' ':!.mcp.json' ':!.windsurf' ':!.windsurfrules' ':!AGENTS.md' ':!CLAUDE.md' ':!docs' ':!padrao.json' ':!scripts' ':!skill-memoria-evolutiva')"
+          if [ -n "$inesperados" ]; then
+            printf 'Arquivos inesperados depois da validação:\n%s\n' "$inesperados"
+            exit 1
+          fi
