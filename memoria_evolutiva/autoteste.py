@@ -72,6 +72,8 @@ def main() -> int:
     tem_fragmentos = isinstance(c.get("rag", {}), dict)
     tem_adaptadores = isinstance(c.get("adaptadores", {}), dict)
     tem_avaliacao = isinstance(c.get("avaliacao", {}), dict)
+    tem_ciclo_autonomo = isinstance(c.get("ciclo", {}), dict)
+    tem_agendamento = isinstance(c.get("agendamento", {}), dict)
 
     def quebra_gerado(t: Path) -> None:
         for g in sorted((t / ger_dir).glob("*.md")):
@@ -147,6 +149,22 @@ def main() -> int:
         caminho = t / "padrao.json"
         dados = json.loads(caminho.read_text(encoding="utf-8"))
         dados["executor"]["publicacao_automatica"] = True
+        caminho.write_text(
+            json.dumps(dados, ensure_ascii=False, indent=4) + "\n", encoding="utf-8"
+        )
+
+    def quebra_ciclo_autonomo(t: Path) -> None:
+        caminho = t / "padrao.json"
+        dados = json.loads(caminho.read_text(encoding="utf-8"))
+        dados["ciclo"]["publicacao_automatica"] = True
+        caminho.write_text(
+            json.dumps(dados, ensure_ascii=False, indent=4) + "\n", encoding="utf-8"
+        )
+
+    def quebra_agendamento(t: Path) -> None:
+        caminho = t / "padrao.json"
+        dados = json.loads(caminho.read_text(encoding="utf-8"))
+        dados["agendamento"]["banco_negocio"] = "permitido"
         caminho.write_text(
             json.dumps(dados, ensure_ascii=False, indent=4) + "\n", encoding="utf-8"
         )
@@ -236,6 +254,12 @@ def main() -> int:
         dict(nome="executor não pode habilitar publicação automática",
              quebra=quebra_executor, comando="validar", esperado=1,
              contem="executor.publicacao_automatica"),
+        dict(nome="ciclo dos agentes não pode habilitar publicação automática",
+             quebra=quebra_ciclo_autonomo, comando="validar", esperado=1,
+             contem="ciclo.publicacao_automatica", aplica=tem_ciclo_autonomo),
+        dict(nome="agendador não pode acessar o banco de negócio",
+             quebra=quebra_agendamento, comando="validar", esperado=1,
+             contem="agendamento.banco_negocio", aplica=tem_agendamento),
         dict(nome="relatório de avaliação RAG adulterado reprova",
              quebra=quebra_avaliacao, comando="avaliar verificar", esperado=1,
              contem="relatório RAG", aplica=tem_avaliacao),

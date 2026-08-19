@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 import json
 import os
 import re
@@ -12,7 +11,7 @@ import tempfile
 from pathlib import Path
 
 from . import __version__, contexto, fragmentos
-from .lib import barras, config, raiz, titulo
+from .lib import barras, config, raiz, sha256_canonico, titulo
 
 
 SCHEMA = 1
@@ -29,7 +28,7 @@ class AdaptadoresErro(RuntimeError):
 
 
 def _sha256_bytes(valor: bytes) -> str:
-    return hashlib.sha256(valor).hexdigest()
+    return sha256_canonico(valor)
 
 
 def _sha256_texto(valor: str) -> str:
@@ -86,13 +85,13 @@ def _bloco_instrucao(
 ## Memória evolutiva — {plataforma}
 
 Bloco derivado; fatos vivem somente em `docs/`.
-- Início: `memoria adaptadores canary --plataforma={plataforma} --perfil={perfil_canary} --json`.
+- Início: `memoria ciclo iniciar --plataforma={plataforma} --perfil={perfil_canary} --json`; ele prepara os provedores e repara estado velho antes do canary.
 - Consulta: MCP `memoria_contexto`; fallback CLI `memoria contexto --pergunta="..." --perfil=PERFIL --json`.
 - Perfis: leitura/análise=`engenharia-leitura`; documentação=`engenharia-documentacao`; código=`automacao-codigo`.
 - `atendimento`/`operacao-assistida` exigem `produto`+`tenant` da identidade autenticada; nunca reutilize escopo ou conversa anterior.
 - Entrada canônica: `docs/PROJETO.md`; sem fonte atual, registre `indeterminado`.
 - Gateway read-only não autoriza commit, push, deploy ou mutação externa.
-- Após mudar código/docs: `memoria documentar`; em cron: `memoria executar --run-id=ID --acao=documentar --json`, sem comando/capacidade inventados.
+- Após mudar código/docs: `memoria ciclo atualizar --plataforma={plataforma} --perfil={perfil_canary} --json`; a manutenção diária usa somente `memoria agendador executar --json`, sem shell, SQL ou capacidade inventada.
 - Antes de aceitar troca de algoritmo/modelo/provedor: `memoria avaliar verificar`; baseline só muda por `memoria avaliar medir` deliberado.
 {FIM}
 """

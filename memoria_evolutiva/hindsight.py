@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 import hashlib
 import json
 import os
@@ -10,8 +11,10 @@ import urllib.error
 import urllib.parse
 import urllib.request
 import uuid
+from collections import OrderedDict
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from threading import BoundedSemaphore, Lock
 
 from . import __version__, indice, seguranca
 from .lib import commit_atual, config, frontmatter, raiz
@@ -19,6 +22,80 @@ from .lib import commit_atual, config, frontmatter, raiz
 
 class HindsightErro(RuntimeError):
     pass
+
+
+_SEMAFOROS: dict[tuple[str, str, int], BoundedSemaphore] = {}
+_SEMAFOROS_LOCK = Lock()
+_CACHE_CONSULTAS: OrderedDict[tuple, dict] = OrderedDict()
+_CACHE_CONSULTAS_LOCK = Lock()
+
+
+def _limite_consultas() -> int:
+    valor = _cfg().get("consultas_paralelas", 2)
+    if isinstance(valor, bool) or not isinstance(valor, int) or not 1 <= valor <= 32:
+        raise HindsightErro("`memoria.consultas_paralelas` precisa ficar entre 1 e 32")
+    return valor
+
+
+def _semaforo_consultas(endpoint: str, banco: str, limite: int) -> BoundedSemaphore:
+    chave = (endpoint, banco, limite)
+    with _SEMAFOROS_LOCK:
+        return _SEMAFOROS.setdefault(chave, BoundedSemaphore(limite))
+
+
+def _token_cache() -> str:
+    marcador = indice.marcador_path()
+    try:
+        estado = marcador.stat()
+        marcador_token = f"{estado.st_mtime_ns}:{estado.st_size}"
+    except OSError:
+        marcador_token = "sem-marcador"
+    ttl = _cfg().get("cache_consulta_ttl_segundos", 30)
+    if isinstance(ttl, bool) or not isinstance(ttl, int) or not 0 <= ttl <= 3600:
+        raise HindsightErro(
+            "`memoria.cache_consulta_ttl_segundos` precisa ficar entre 0 e 3600"
+        )
+    janela = int(time.monotonic() // ttl) if ttl else time.monotonic_ns()
+    return f"{marcador_token}:{janela}"
+
+
+def _limpar_cache_consultas() -> None:
+    with _CACHE_CONSULTAS_LOCK:
+        _CACHE_CONSULTAS.clear()
+
+
+def _consultar_cache(endpoint: str, banco: str, tags: tuple[str, ...],
+                     pergunta: str, max_tokens: int, budget: str,
+                     token_cache: str, limite: int) -> dict:
+    pergunta_sha = hashlib.sha256(pergunta.encode("utf-8")).hexdigest()
+    chave = (
+        endpoint, banco, tags, pergunta_sha, max_tokens, budget, token_cache, limite,
+    )
+    with _CACHE_CONSULTAS_LOCK:
+        anterior = _CACHE_CONSULTAS.get(chave)
+        if anterior is not None:
+            _CACHE_CONSULTAS.move_to_end(chave)
+            return anterior
+    with _semaforo_consultas(endpoint, banco, limite):
+        resposta = _requisitar(
+            "POST",
+            f"/v1/default/banks/{urllib.parse.quote(banco, safe='')}/memories/recall",
+            {
+                "query": pergunta,
+                "types": ["world", "experience", "observation"],
+                "max_tokens": max_tokens,
+                "budget": budget,
+                "include_chunks": True,
+                "tags": list(tags),
+                "tags_match": "all_strict",
+            },
+        )
+    with _CACHE_CONSULTAS_LOCK:
+        _CACHE_CONSULTAS[chave] = resposta
+        _CACHE_CONSULTAS.move_to_end(chave)
+        while len(_CACHE_CONSULTAS) > 256:
+            _CACHE_CONSULTAS.popitem(last=False)
+    return resposta
 
 
 class _SemRedirecionamento(urllib.request.HTTPRedirectHandler):
@@ -262,6 +339,7 @@ def verificar_ao_vivo() -> dict:
 
 def sincronizar() -> dict:
     """Atualiza documentos individualmente, confirma todos e só então marca."""
+    _limpar_cache_consultas()
     documentos, hashes = _documentos()
     if not documentos:
         raise HindsightErro("o núcleo documental está vazio; nada foi enviado ao Hindsight")
@@ -334,16 +412,11 @@ def sincronizar() -> dict:
 def consultar(pergunta: str, max_tokens: int = 4096) -> dict:
     if isinstance(max_tokens, bool) or not isinstance(max_tokens, int) or max_tokens < 1:
         raise HindsightErro("`max_tokens` da consulta precisa ser inteiro positivo")
-    return _requisitar(
-        "POST",
-        f"/v1/default/banks/{urllib.parse.quote(_banco(), safe='')}/memories/recall",
-        {
-            "query": pergunta,
-            "types": ["world", "experience", "observation"],
-            "max_tokens": max_tokens,
-            "budget": "mid",
-            "include_chunks": True,
-            "tags": [*_tags(), "vigente"],
-            "tags_match": "all_strict",
-        },
+    budget = str(_cfg().get("consulta_budget", "mid"))
+    if budget not in {"low", "mid", "high"}:
+        raise HindsightErro("`memoria.consulta_budget` precisa ser low, mid ou high")
+    resposta = _consultar_cache(
+        _endpoint(), _banco(), tuple([*_tags(), "vigente"]), pergunta,
+        max_tokens, budget, _token_cache(), _limite_consultas(),
     )
+    return copy.deepcopy(resposta)

@@ -53,6 +53,10 @@ GITIGNORE_EXECUTOR = """# memoria-evolutiva: estado local do executor
 .memoria/executor/
 """
 
+GITIGNORE_AGENDADOR = """# memoria-evolutiva: scripts e logs locais do agendador
+.memoria/agendador/
+"""
+
 
 def _origem_imutavel_ci() -> str:
     """Descobre a origem exata do pacote sem transferir essa escolha ao projeto."""
@@ -124,6 +128,9 @@ def _ignorar_estado_local(raiz_: str, ajustados: list[str],
     if "# memoria-evolutiva: estado local do executor" not in atual:
         blocos.append(GITIGNORE_EXECUTOR)
         ajustados.append(".gitignore → estado local do executor")
+    if "# memoria-evolutiva: scripts e logs locais do agendador" not in atual:
+        blocos.append(GITIGNORE_AGENDADOR)
+        ajustados.append(".gitignore → scripts e logs locais do agendador")
     if not blocos:
         return
     separador = "" if not atual or atual.endswith("\n") else "\n"
@@ -220,6 +227,9 @@ def _config_nova(projeto: str, codigo: str, bancos_ativos: bool,
             "banco": projeto,
             "api_key_env": None,
             "timeout_segundos": 300,
+            "consulta_budget": "mid",
+            "consultas_paralelas": 2,
+            "cache_consulta_ttl_segundos": 30,
             "marcador": "docs/.hindsight-indexado.json",
             "nucleo": ["docs/PROJETO.md", "docs/ESTADO.md", "docs/ABERTO.md",
                        "docs/GLOSSARIO.md", "docs/cronologia/", "docs/produto/",
@@ -258,6 +268,23 @@ def _config_nova(projeto: str, codigo: str, bancos_ativos: bool,
             "perfil_canary": "engenharia-leitura",
             "plataformas": ["codex", "claude", "cursor", "windsurf", "hermes"],
         },
+        "ciclo": {
+            "ativo": True,
+            "auto_reparar_no_inicio": True,
+            "iniciar_hindsight_embed": True,
+            "timeout_inicializacao_segundos": 180,
+            "mutacao_externa": "somente-bancos-locais",
+            "publicacao_automatica": False,
+        },
+        "agendamento": {
+            "ativo": True,
+            "registrar_na_instalacao": True,
+            "frequencia": "diaria",
+            "horario_local": "02:15",
+            "comando": "memoria-agendador-v1",
+            "banco_negocio": "proibido",
+            "publicacao_automatica": False,
+        },
         "executor": {
             "ativo": True,
             "estado": ".memoria/executor",
@@ -293,6 +320,7 @@ def _config_nova(projeto: str, codigo: str, bancos_ativos: bool,
             "comando": ["graphify"],
             "arquivo": "graphify-out/graph.json",
             "marcador": ".memoria/bancos/graphify.json",
+            "extensoes_literais": [".sql"],
             "timeout_segundos": 900,
         },
         "autonomia": {
@@ -314,7 +342,9 @@ def main(argv: list[str]) -> int:
         else:
             invalidos.append(a)
 
-    desconhecidos = sorted(set(args) - {"projeto", "codigo", "sem-bancos", "adiar-bancos"})
+    desconhecidos = sorted(set(args) - {
+        "projeto", "codigo", "sem-bancos", "adiar-bancos", "sem-agendamento",
+    })
     if desconhecidos or invalidos:
         nomes = [*(f"--{a}" for a in desconhecidos), *invalidos]
         print("Opção desconhecida: " + ", ".join(nomes))
@@ -328,6 +358,7 @@ def main(argv: list[str]) -> int:
     codigo = codigo_arg
     sem_bancos = bool(args.get("sem-bancos"))
     adiar_bancos = bool(args.get("adiar-bancos"))
+    sem_agendamento = bool(args.get("sem-agendamento"))
     if sem_bancos and adiar_bancos:
         print("Use apenas um: `--sem-bancos` ou `--adiar-bancos`.")
         return 2
@@ -341,6 +372,7 @@ def main(argv: list[str]) -> int:
         print("  --codigo=PASTA    onde o código vive (padrão: src). O gerador varre daí.")
         print("  --adiar-bancos     configura Hindsight+Graphify, sem sincronizar nesta execução.")
         print("  --sem-bancos       opt-out explícito: instala somente documentação canônica.")
+        print("  --sem-agendamento  não registra a execução diária nesta instalação.")
         return 2
 
     # A raiz do projeto é o CWD — rode o instalador na raiz. (raiz() da lib procuraria
@@ -480,6 +512,28 @@ def main(argv: list[str]) -> int:
             atual["adaptadores"] = config_["adaptadores"]
             ajustados.append("adaptadores → cinco clientes a partir do manifesto neutro")
 
+        if "ciclo" not in atual:
+            atual["ciclo"] = config_["ciclo"]
+            ajustados.append("ciclo → início auto-reparável e atualização comum a todos os agentes")
+        else:
+            for chave, valor in config_["ciclo"].items():
+                if chave not in atual["ciclo"]:
+                    atual["ciclo"][chave] = valor
+                    ajustados.append(
+                        f"ciclo.{chave} → {json.dumps(valor, ensure_ascii=False)}"
+                    )
+
+        if "agendamento" not in atual:
+            atual["agendamento"] = config_["agendamento"]
+            ajustados.append("agendamento → atualização diária fechada e sem banco de negócio")
+        else:
+            for chave, valor in config_["agendamento"].items():
+                if chave not in atual["agendamento"]:
+                    atual["agendamento"][chave] = valor
+                    ajustados.append(
+                        f"agendamento.{chave} → {json.dumps(valor, ensure_ascii=False)}"
+                    )
+
         if "executor" not in atual:
             atual["executor"] = config_["executor"]
             ajustados.append("executor → runs idempotentes em worktree isolada")
@@ -603,6 +657,15 @@ def main(argv: list[str]) -> int:
     else:
         existiam.append(str(corpus_avaliacao))
 
+    # -------------------------------------------- provedores locais auto-gerenciados
+    if bancos_ativos and not adiar_bancos:
+        from . import provisao
+        try:
+            provisao.garantir()
+        except provisao.ProvisaoErro as exc:
+            print(f"\nA estrutura foi instalada, mas os provedores locais não ficaram prontos: {exc}")
+            return 1
+
     # ------------------------------------------------ documentação autônoma inicial
     from . import documentar
     iniciais = {
@@ -617,6 +680,19 @@ def main(argv: list[str]) -> int:
     if rc_documentar != 0:
         print("\nA estrutura foi instalada, mas a documentação autônoma não validou.")
         return rc_documentar
+
+    # O único job registrado chama o comando fechado da biblioteca. Ele atualiza docs,
+    # Hindsight e Graphify, mas não recebe conexão nem comando para o banco da aplicação.
+    if bancos_ativos and not adiar_bancos and not sem_agendamento:
+        from . import agendador
+        rc_agendamento, saida_agendamento = agendador.operar("instalar")
+        if rc_agendamento != 0:
+            print("\nA memória foi instalada, mas o agendamento diário não foi registrado: "
+                  + str(saida_agendamento.get("erro") or "falha não detalhada"))
+            return rc_agendamento
+        ajustados.append(
+            "agendamento diário → " + str(saida_agendamento.get("horario_local", "02:15"))
+        )
 
     # ------------------------------------------------------------------- relatório
     print(f"\nEstrutura do padrão — {projeto}")
@@ -653,6 +729,10 @@ def main(argv: list[str]) -> int:
             print("  memoria bancos sincronizar  ← pendente por `--adiar-bancos`")
         else:
             print("  Hindsight local + Graphify foram sincronizados e verificados")
+            if sem_agendamento:
+                print("  agendamento diário não registrado por `--sem-agendamento`")
+            else:
+                print("  atualização diária da memória registrada para 02:15")
     print("\nA verificação documental não depende de aprovação humana. Fato sem prova fica")
     print("`indeterminado`; publicação e ação externa continuam exigindo autorização própria.")
     return 0

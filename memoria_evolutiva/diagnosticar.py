@@ -3,13 +3,12 @@
 from __future__ import annotations
 
 import json
-import hashlib
 import subprocess
 from collections import Counter
 from functools import lru_cache
 from pathlib import Path
 
-from .lib import barras, config, raiz
+from .lib import barras, config, identidade_arquivo, raiz, sha256_canonico
 
 
 PULAR = {
@@ -68,7 +67,7 @@ def inventario_projeto() -> list[dict[str, str | int]]:
     """Lê e identifica todos os arquivos relevantes do repositório.
 
     O acervo canônico e diretórios descartáveis ficam fora para evitar autorreferência.
-    O hash prova os bytes considerados, não compreensão semântica.
+    O hash prova o conteúdo canônico, normalizando apenas LF/CRLF em texto UTF-8.
     """
     c = config()
     base = Path(raiz())
@@ -82,16 +81,11 @@ def inventario_projeto() -> list[dict[str, str | int]]:
                 and not (codigo_dentro_do_acervo
                          and resolvido.is_relative_to(raiz_codigo))):
             continue
-        digest = hashlib.sha256()
-        tamanho = 0
-        with arquivo.open("rb") as stream:
-            while bloco := stream.read(1024 * 1024):
-                digest.update(bloco)
-                tamanho += len(bloco)
+        tamanho, digest = identidade_arquivo(arquivo)
         itens.append({
             "arquivo": barras(str(arquivo.relative_to(base))),
             "bytes": tamanho,
-            "sha256": digest.hexdigest(),
+            "sha256": digest,
         })
     return itens
 
@@ -168,19 +162,19 @@ def coletar(incluir_estado_trabalho: bool = True) -> dict:
             "extensoes_configuradas": sorted(ext.lstrip(".") for ext in extensoes_codigo),
             "arquivos": sum(por_extensao.values()),
             "por_extensao": dict(sorted(por_extensao.items())),
-            "cobertura_sha256": hashlib.sha256(
+            "cobertura_sha256": sha256_canonico(
                 "\n".join(
                     f"{item['arquivo']}:{item['sha256']}" for item in inventario
-                ).encode("utf-8")
-            ).hexdigest(),
+                )
+            ),
         },
         "repositorio": {
             "arquivos_considerados_no_inventario": len(arquivos),
-            "cobertura_sha256": hashlib.sha256(
+            "cobertura_sha256": sha256_canonico(
                 "\n".join(
                     f"{item['arquivo']}:{item['sha256']}" for item in inventario_total
-                ).encode("utf-8")
-            ).hexdigest(),
+                )
+            ),
             "manifestos": [nome for nome in MANIFESTOS if (base / nome).is_file()],
             "workflows": workflows,
             "arquivos_de_teste": len(testes),

@@ -40,7 +40,7 @@ Projeto novo: pode pular direto para o passo 1.
 ## 1. Instale o pacote
 
 ```bash
-pipx install git+https://github.com/LastMind-dev/memoria-evolutiva.git@main
+pipx install --include-deps "memoria-evolutiva[local] @ git+https://github.com/LastMind-dev/memoria-evolutiva.git@main"
 ```
 
 O pacote ainda não foi publicado no PyPI. O `@main` acima é somente o bootstrap. O
@@ -67,10 +67,10 @@ insere somente um bloco gerenciado de descoberta. A IA extrai fatos verificávei
 
 ## 2. Rode o instalador — na raiz do projeto
 
-Antes, deixe o Hindsight local acessível em `http://127.0.0.1:8888` e instale o
-Graphify (`graphifyy`) de forma que `graphify` esteja no PATH. O Hindsight usa a
-configuração de modelo local/credencial do próprio serviço; segredo nunca entra em
-`padrao.json`.
+O extra `local` já instala Hindsight Embed e Graphify. Configure uma vez o perfil global
+do Hindsight ou forneça `HINDSIGHT_API_LLM_*`; o modelo continua fora do projeto e pode
+ser local ou remoto. O instalador inicia o daemon de loopback sob demanda; segredo nunca
+entra em `padrao.json`.
 
 ```bash
 memoria instalar --projeto="meu-app" --codigo=src
@@ -89,6 +89,9 @@ todos passarem e grava relatório/manifesto reconstruíveis da qualidade do RAG.
 `--codigo` é a pasta que o gerador varre (`src`, `app`, `lib`, `packages`...). Hindsight
 e Graphify já são padrão; não existe decisão por projeto sobre qual ferramenta usar.
 `--adiar-bancos` apenas adia a primeira sincronização e `--sem-bancos` é opt-out explícito.
+A instalação completa também registra a atualização diária às 02:15. O opt-out
+`--sem-agendamento` existe para hosts que proíbem tarefas do usuário; ele não altera a
+configuração segura nem concede acesso ao banco da aplicação.
 
 Ele troca `<NOME-DO-PROJETO>` pelo nome real nos modelos e transforma
 `docs/cronologia/AAAA-MM.md` no mês corrente. O `padrao.json` publicado vem com o nome
@@ -103,12 +106,19 @@ decisão sua ele nunca sobrescreve. Rodar de novo não estraga nada.
 ## 3. Manutenção autônoma
 
 ```bash
-memoria documentar
-memoria avaliar verificar
+memoria ciclo iniciar --plataforma=codex --perfil=engenharia-leitura --json
+memoria ciclo atualizar --plataforma=codex --perfil=engenharia-leitura --json
+memoria agendador status --json
 ```
 
-O comando atualiza apenas documentos marcados como gerenciados, regenera os derivados,
-valida e sincroniza Hindsight+Graphify. Não há proposta intermediária nem promoção humana.
+O primeiro comando usa um canary rápido e só repara quando detecta estado velho. O
+segundo atualiza apenas documentos gerenciados, regenera os derivados, valida, sincroniza
+Hindsight+Graphify e repete o canary. Os cinco adaptadores recebem esses gatilhos durante
+a instalação; não há proposta intermediária nem promoção humana.
+
+O agendador diário chama apenas `memoria agendador executar --json`. O comando não
+aceita SQL nem comando arbitrário, trabalha sob o lock comum da memória, nunca cria
+commit ou publicação e não conhece a conexão do banco de negócio.
 
 ## 4. Como a IA decide
 
@@ -214,6 +224,7 @@ Comece cada sessão pelo `PROJETO.md`, feche cada sessão pelo runbook, e deixe 
 | `memoria indice` | compatibilidade: estado do Hindsight | documento do núcleo mudou |
 | `memoria autoteste` | quebra uma cópia de propósito e confere que os validadores reclamam | algum validador parou de pegar o que promete |
 | `memoria executar ... --json` | ação não interativa, idempotente e isolada | o envelope identifica falha, timeout, lock ou capacidade recusada |
+| `memoria agendador ... --json` | registra, confirma ou executa a manutenção diária fechada | tarefa ausente, configuração insegura ou ciclo falha |
 | `memoria avaliar` | mede/verifica hit@1, hit@3, citações, ausência de fonte e drift | corpus, baseline, perfil ou métrica regride |
 | `memoria skill` | monta a peça de procedimento (skill/comando) a partir do runbook | `--conferir` falha se fonte, gerador ou artefato divergir |
 

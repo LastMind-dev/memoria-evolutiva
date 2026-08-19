@@ -16,8 +16,10 @@ from pathlib import Path
 from unittest import mock
 
 from memoria_evolutiva.fragmentos import _cabecalhos, _partir_texto, consultaveis
-from memoria_evolutiva.lib import hash_do_conteudo
-from memoria_evolutiva import contexto, executor, seguranca
+from memoria_evolutiva.lib import bytes_canonicos, hash_do_conteudo, sha256_canonico
+from memoria_evolutiva import (
+    agendador, ciclo, contexto, executor, grafo, hindsight, provisao, seguranca,
+)
 
 
 REPOSITORIO = Path(__file__).resolve().parents[1]
@@ -149,9 +151,21 @@ class CliEmProjetoTemporario(unittest.TestCase):
         self.assertIn("privado/", gitignore)
         self.assertIn("graphify-out/cache/", gitignore)
         self.assertIn(".memoria/executor/", gitignore)
+        self.assertIn(".memoria/agendador/", gitignore)
         self.assertTrue(configuracao["executor"]["ativo"])
         self.assertEqual([], configuracao["executor"]["capacidades_permitidas"])
         self.assertFalse(configuracao["executor"]["publicacao_automatica"])
+        self.assertTrue(configuracao["ciclo"]["ativo"])
+        self.assertTrue(configuracao["ciclo"]["auto_reparar_no_inicio"])
+        self.assertTrue(configuracao["ciclo"]["iniciar_hindsight_embed"])
+        self.assertEqual("somente-bancos-locais", configuracao["ciclo"]["mutacao_externa"])
+        self.assertFalse(configuracao["ciclo"]["publicacao_automatica"])
+        self.assertTrue(configuracao["agendamento"]["ativo"])
+        self.assertTrue(configuracao["agendamento"]["registrar_na_instalacao"])
+        self.assertEqual("diaria", configuracao["agendamento"]["frequencia"])
+        self.assertEqual("02:15", configuracao["agendamento"]["horario_local"])
+        self.assertEqual("proibido", configuracao["agendamento"]["banco_negocio"])
+        self.assertFalse(configuracao["agendamento"]["publicacao_automatica"])
         self.assertTrue(configuracao["avaliacao"]["ativo"])
         for caminho in (
             "docs/avaliacao/casos-rag-v1.json",
@@ -167,6 +181,11 @@ class CliEmProjetoTemporario(unittest.TestCase):
         self.assertEqual(0, verificada.returncode, verificada.stdout + verificada.stderr)
         relatorio = payload["relatorio"]
         self.assertTrue(relatorio["gate"]["aprovado"])
+        self.assertFalse(relatorio["prontidao"]["atendimento"]["pronta"])
+        self.assertEqual(
+            "sem_corpus_positivo_autorizado",
+            relatorio["prontidao"]["atendimento"]["motivo"],
+        )
         self.assertEqual(1.0, relatorio["metricas"]["global"]["hit_3"])
         self.assertEqual(1.0, relatorio["metricas"]["global"]["cobertura_citacao"])
         self.assertEqual(0.0, relatorio["metricas"]["global"]["sem_fonte"])
@@ -247,6 +266,29 @@ class CliEmProjetoTemporario(unittest.TestCase):
         self.assertEqual(1, sem_positivos.returncode, sem_positivos.stdout)
         self.assertIn("caso positivo de engenharia e de automacao", sem_positivos.stdout)
         self.assertEqual(baseline_antes, baseline.read_bytes())
+
+    def test_baseline_legada_crlf_nao_exige_remedicao_sem_mudanca_real(self) -> None:
+        corpus_path = self.projeto / "docs/avaliacao/casos-rag-v1.json"
+        corpus_crlf = corpus_path.read_bytes().replace(b"\r\n", b"\n").replace(b"\n", b"\r\n")
+        corpus_path.write_bytes(corpus_crlf)
+        baseline_path = self.projeto / "docs/politicas/baseline-rag-v1.json"
+        baseline = json.loads(baseline_path.read_text(encoding="utf-8"))
+        baseline["corpus_sha256"] = hashlib.sha256(corpus_crlf).hexdigest()
+        sem_assinatura = {
+            chave: valor for chave, valor in baseline.items() if chave != "assinatura"
+        }
+        baseline["assinatura"] = hashlib.sha256(json.dumps(
+            sem_assinatura, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+        ).encode("utf-8")).hexdigest()
+        baseline_path.write_text(
+            json.dumps(baseline, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+        )
+        baseline_antes = baseline_path.read_bytes()
+
+        gerada = self.cli("avaliar", "gerar", "--json")
+
+        self.assertEqual(0, gerada.returncode, gerada.stdout + gerada.stderr)
+        self.assertEqual(baseline_antes, baseline_path.read_bytes())
 
     def test_executor_documenta_em_worktree_retorna_e_nao_duplica_run(self) -> None:
         base = self.preparar_git()
@@ -426,7 +468,7 @@ class CliEmProjetoTemporario(unittest.TestCase):
 
         self.assertEqual(0, verificar.returncode, verificar.stdout + verificar.stderr)
         self.assertEqual(0, autoteste.returncode, autoteste.stdout + autoteste.stderr)
-        self.assertIn("22 passaram", autoteste.stdout)
+        self.assertIn("24 passaram", autoteste.stdout)
         self.assertEqual(antes, depois)
 
     def test_consulta_conjunta_recusa_opt_out_sem_tentar_provedores(self) -> None:
@@ -481,6 +523,38 @@ class CliEmProjetoTemporario(unittest.TestCase):
         self.assertEqual({".php": 1}, dados["codigo"]["por_extensao"])
         self.assertTrue(json.loads(analise.stdout)["lacunas_para_confirmar"])
         self.assertEqual(antes, depois)
+
+    def test_clone_com_autocrlf_preserva_validacao_e_adaptadores(self) -> None:
+        self.preparar_git()
+        atualizado = self.cli("documentar")
+        self.assertEqual(0, atualizado.returncode, atualizado.stdout + atualizado.stderr)
+        for comando in (
+            ["git", "add", "."],
+            ["git", "commit", "-m", "memoria atualizada"],
+        ):
+            resultado = subprocess.run(
+                comando, cwd=self.projeto, capture_output=True, text=True,
+                encoding="utf-8", timeout=30,
+            )
+            self.assertEqual(0, resultado.returncode, resultado.stdout + resultado.stderr)
+
+        clone = Path(self._tmp.name) / "clone-crlf"
+        resultado = subprocess.run(
+            ["git", "-c", "core.autocrlf=true", "clone", str(self.projeto), str(clone)],
+            capture_output=True, text=True, encoding="utf-8", timeout=60,
+        )
+        self.assertEqual(0, resultado.returncode, resultado.stdout + resultado.stderr)
+        self.assertIn(b"\r\n", (clone / "src/exemplo.php").read_bytes())
+
+        env = os.environ.copy()
+        env["PYTHONPATH"] = str(REPOSITORIO) + os.pathsep + env.get("PYTHONPATH", "")
+        env["PYTHONUTF8"] = "1"
+        for args in (("validar",), ("adaptadores", "verificar"), ("avaliar", "verificar")):
+            verificado = subprocess.run(
+                [sys.executable, "-m", "memoria_evolutiva", *args], cwd=clone,
+                env=env, capture_output=True, text=True, encoding="utf-8", timeout=120,
+            )
+            self.assertEqual(0, verificado.returncode, verificado.stdout + verificado.stderr)
 
     def test_diagnostico_com_raiz_ponto_nao_conta_o_proprio_acervo(self) -> None:
         (self.projeto / "README.md").write_text("# Fonte observável\n", encoding="utf-8")
@@ -754,6 +828,46 @@ class CliEmProjetoTemporario(unittest.TestCase):
         self.assertTrue(all("FDD-PUBLICO" in f["fragment_id"] for f in envelope["fontes"]))
         self.assertEqual([], envelope["codigo"])
 
+    def test_atendimento_so_fica_pronto_com_caso_positivo_autorizado_aprovado(self) -> None:
+        publico = self.projeto / "docs/funcional/FDD-ATENDIMENTO.md"
+        publico.write_text(
+            "---\nid: FDD-ATENDIMENTO\ntipo: fdd\nprojeto: fixture\n"
+            "titulo: Rastreamento do atendimento\nstatus: verificado\n"
+            "classificacao: publico\naudience:\n  - atendimento\n"
+            "produtos:\n  - produto-a\ntenants:\n  - tenant-a\n---\n\n"
+            "# Rastreamento do atendimento\n\n## Entrega\n\n"
+            "O código sabiá identifica a entrega do produto A para o tenant A.\n",
+            encoding="utf-8",
+        )
+        corpus_path = self.projeto / "docs/avaliacao/casos-rag-v1.json"
+        corpus = json.loads(corpus_path.read_text(encoding="utf-8"))
+        corpus["casos"].append({
+            "id": "atendimento-rastreamento-autorizado",
+            "categoria": "atendimento",
+            "perfil": "atendimento",
+            "produto": "produto-a",
+            "tenant": "tenant-a",
+            "pergunta": "qual código identifica a entrega do produto A?",
+            "resposta_esperada": "O código sabiá identifica a entrega.",
+            "fontes_esperadas": ["docs/funcional/FDD-ATENDIMENTO.md"],
+            "fontes_proibidas": ["docs/PROJETO.md", "docs/arquitetura/"],
+            "termos_esperados": ["código sabiá", "identifica a entrega"],
+            "espera_sem_fonte": False,
+        })
+        corpus_path.write_text(
+            json.dumps(corpus, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+        )
+        self.assertEqual(0, self.cli("fragmentos", "gerar").returncode)
+
+        medicao = self.cli("avaliar", "medir", "--json")
+        payload = json.loads(medicao.stdout)
+
+        self.assertEqual(0, medicao.returncode, medicao.stdout + medicao.stderr)
+        estado = payload["relatorio"]["prontidao"]["atendimento"]
+        self.assertTrue(estado["pronta"])
+        self.assertEqual("casos_positivos_autorizados_aprovados", estado["motivo"])
+        self.assertEqual(1, estado["casos_positivos"])
+
     def test_atendimento_exige_escopo_explicito_e_nao_herda_contexto(self) -> None:
         sem_escopo = self.cli(
             "contexto", "--pergunta=projeto", "--perfil=atendimento", "--json"
@@ -902,6 +1016,9 @@ class CliEmProjetoTemporario(unittest.TestCase):
         self.assertTrue((self.projeto / ".cursor/mcp.json").is_file())
         self.assertTrue((self.projeto / ".windsurf/rules/memoria-evolutiva.md").is_file())
         self.assertTrue((self.projeto / ".hermes.md").is_file())
+        instrucoes = (self.projeto / "AGENTS.md").read_text(encoding="utf-8")
+        self.assertIn("memoria ciclo iniciar --plataforma=codex", instrucoes)
+        self.assertIn("memoria ciclo atualizar --plataforma=codex", instrucoes)
 
         for comando in (
             ["git", "init"],
@@ -936,6 +1053,54 @@ class CliEmProjetoTemporario(unittest.TestCase):
         )
         self.assertEqual(1, perfil_divergente.returncode)
         self.assertIn("perfil do canary diverge", perfil_divergente.stdout)
+
+        for acao in ("iniciar", "atualizar"):
+            resultado = self.cli(
+                "ciclo", acao, "--plataforma=codex",
+                "--perfil=engenharia-leitura", "--json",
+            )
+            envelope = json.loads(resultado.stdout)
+            self.assertEqual(0, resultado.returncode, resultado.stdout + resultado.stderr)
+            self.assertTrue(envelope["ok"])
+            self.assertFalse(envelope["publicado"])
+            self.assertFalse(envelope["commit_criado"])
+
+    def test_ciclo_cli_exige_envelope_fechado(self) -> None:
+        resultado = self.cli("ciclo", "iniciar", "--plataforma=codex")
+
+        payload = json.loads(resultado.stdout)
+        self.assertEqual(2, resultado.returncode, resultado.stdout + resultado.stderr)
+        self.assertFalse(payload["ok"])
+        self.assertFalse(payload["publicado"])
+        self.assertFalse(payload["commit_criado"])
+
+    def test_validar_recusa_ciclo_com_publicacao_automatica(self) -> None:
+        caminho = self.projeto / "padrao.json"
+        configuracao = json.loads(caminho.read_text(encoding="utf-8"))
+        configuracao["ciclo"]["publicacao_automatica"] = True
+        caminho.write_text(
+            json.dumps(configuracao, ensure_ascii=False, indent=4) + "\n",
+            encoding="utf-8",
+        )
+
+        resultado = self.cli("validar")
+
+        self.assertEqual(1, resultado.returncode, resultado.stdout + resultado.stderr)
+        self.assertIn("ciclo.publicacao_automatica", resultado.stdout)
+
+        configuracao["ciclo"]["ativo"] = False
+        caminho.write_text(
+            json.dumps(configuracao, ensure_ascii=False, indent=4) + "\n",
+            encoding="utf-8",
+        )
+        ciclo_invalido = self.cli(
+            "ciclo", "iniciar", "--plataforma=codex",
+            "--perfil=engenharia-leitura", "--json",
+        )
+        envelope = json.loads(ciclo_invalido.stdout)
+        self.assertEqual(1, ciclo_invalido.returncode)
+        self.assertFalse(envelope["ok"])
+        self.assertNotIn("Traceback", ciclo_invalido.stdout + ciclo_invalido.stderr)
 
     def test_adaptador_adulterado_bloqueia_gate_e_merge_preserva_outro_mcp(self) -> None:
         claude = self.projeto / ".mcp.json"
@@ -1325,6 +1490,41 @@ class CliEmProjetoTemporario(unittest.TestCase):
 
 
 class HashDoConteudoTest(unittest.TestCase):
+    def test_identidade_textual_normaliza_lf_crlf_sem_relaxar_binario(self) -> None:
+        lf = b"linha um\nlinha dois\n"
+        crlf = b"linha um\r\nlinha dois\r\n"
+        self.assertEqual(lf, bytes_canonicos(crlf))
+        self.assertEqual(sha256_canonico(lf), sha256_canonico(crlf))
+        self.assertNotEqual(
+            sha256_canonico(b"\x00linha\r\n"),
+            sha256_canonico(b"\x00linha\n"),
+        )
+
+    def test_intencao_em_portugues_promove_nome_tecnico_do_arquivo(self) -> None:
+        casos = (
+            ("onde um pedido é excluído", "pedidos/deletar-pedido.php", "pedidos/resumo.php"),
+            ("onde o pedido é gravado", "pedidos/salva-pedido.php", "pedidos/novo-pedido.php"),
+            ("onde pesquisa cliente por cpf", "pedidos/searchCpfCnpj.php", "pedidos/clientes.php"),
+            ("onde processa agregações", "includes/faturamento-proccess.php", "dashboard.php"),
+        )
+        for pergunta, esperado, generico in casos:
+            with self.subTest(pergunta=pergunta):
+                self.assertGreater(
+                    contexto._pontuacao_caminho(pergunta, esperado),
+                    contexto._pontuacao_caminho(pergunta, generico),
+                )
+
+    def test_cache_lexical_retem_fonte_estatica_mas_nao_a_pergunta(self) -> None:
+        contexto._normalizar_estatico.cache_clear()
+        contexto._pontuacao("consulta privada efemera", "fonte estática repetida")
+        primeira = contexto._normalizar_estatico.cache_info()
+        contexto._pontuacao("outra consulta privada", "fonte estática repetida")
+        segunda = contexto._normalizar_estatico.cache_info()
+
+        self.assertEqual(1, primeira.misses)
+        self.assertEqual(1, segunda.misses)
+        self.assertGreaterEqual(segunda.hits, 1)
+
     def test_fragmentacao_reconhece_titulos_setext(self) -> None:
         cabecalhos = _cabecalhos(
             "Título (teste)\n==============\n\n[Seção](https://exemplo.test)\n------\n\nCorpo.\n"
@@ -1441,6 +1641,138 @@ class SegurancaMemoriaTest(unittest.TestCase):
             )
         with self.assertRaises(executor.ExecutorTimeout):
             executor._git_ate(REPOSITORIO, time.monotonic() - 1, "status")
+
+
+class ConsultaHindsightTest(unittest.TestCase):
+    def tearDown(self) -> None:
+        hindsight._limpar_cache_consultas()
+
+    def test_consulta_identica_usa_cache_e_devolve_copia_isolada(self) -> None:
+        hindsight._limpar_cache_consultas()
+        resposta = {"results": [{"text": "fonte atual"}]}
+        with (
+            mock.patch.object(hindsight, "_cfg", return_value={
+                "consulta_budget": "mid",
+                "consultas_paralelas": 2,
+            }),
+            mock.patch.object(hindsight, "_endpoint", return_value="http://127.0.0.1:8888"),
+            mock.patch.object(hindsight, "_banco", return_value="fixture"),
+            mock.patch.object(hindsight, "_tags", return_value=["projeto:fixture"]),
+            mock.patch.object(hindsight, "_token_cache", return_value="marcador:janela"),
+            mock.patch.object(hindsight, "_requisitar", return_value=resposta) as requisitar,
+        ):
+            primeira = hindsight.consultar("como executar?", max_tokens=512)
+            primeira["results"][0]["text"] = "alterado pelo consumidor"
+            segunda = hindsight.consultar("como executar?", max_tokens=512)
+
+        self.assertEqual("fonte atual", segunda["results"][0]["text"])
+        requisitar.assert_called_once()
+        self.assertEqual("mid", requisitar.call_args.args[2]["budget"])
+
+    def test_limite_de_consultas_concorrentes_e_respeitado(self) -> None:
+        from concurrent.futures import ThreadPoolExecutor
+
+        hindsight._limpar_cache_consultas()
+        ativos = 0
+        maximo = 0
+        trava = threading.Lock()
+
+        def requisitar(*args: object, **kwargs: object) -> dict:
+            nonlocal ativos, maximo
+            with trava:
+                ativos += 1
+                maximo = max(maximo, ativos)
+            time.sleep(0.03)
+            with trava:
+                ativos -= 1
+            return {"results": []}
+
+        with mock.patch.object(hindsight, "_requisitar", side_effect=requisitar):
+            with ThreadPoolExecutor(max_workers=8) as executor:
+                list(executor.map(
+                    lambda indice: hindsight._consultar_cache(
+                        "http://127.0.0.1:8888", "fixture", ("vigente",),
+                        f"pergunta {indice}", 512, "mid", "janela", 2,
+                    ),
+                    range(8),
+                ))
+
+        self.assertLessEqual(maximo, 2)
+        self.assertGreaterEqual(maximo, 1)
+
+    def test_cache_nao_retem_pergunta_bruta_na_chave(self) -> None:
+        hindsight._limpar_cache_consultas()
+        segredo = "consulta privada que nao deve ficar na chave"
+        with mock.patch.object(hindsight, "_requisitar", return_value={"results": []}):
+            hindsight._consultar_cache(
+                "http://127.0.0.1:8888", "fixture", ("vigente",),
+                segredo, 512, "mid", "janela", 2,
+            )
+        chaves = list(hindsight._CACHE_CONSULTAS)
+        self.assertTrue(chaves)
+        self.assertNotIn(segredo, repr(chaves))
+        self.assertIn(hashlib.sha256(segredo.encode("utf-8")).hexdigest(), repr(chaves))
+
+
+class DescobertaGraphifyTest(unittest.TestCase):
+    def test_comando_encontra_executavel_instalado_por_uv_fora_do_path(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="graphify-uv-") as tmp:
+            executavel = Path(tmp) / ("graphify.exe" if os.name == "nt" else "graphify")
+            executavel.write_bytes(b"")
+            with (
+                mock.patch.object(grafo, "_cfg", return_value={"comando": ["graphify"]}),
+                mock.patch.object(grafo.shutil, "which", return_value=None),
+                mock.patch.object(grafo, "_executavel_uv", return_value=str(executavel)),
+            ):
+                comando = grafo._comando()
+
+        self.assertEqual([str(executavel)], comando)
+
+    def test_verificacao_simultanea_do_grafo_executa_uma_unica_vez(self) -> None:
+        from concurrent.futures import ThreadPoolExecutor
+
+        contexto._GRAFO_VERIFICACOES.clear()
+        barreira = threading.Barrier(8)
+
+        def verificar(*args: object, **kwargs: object) -> int:
+            time.sleep(0.03)
+            return 0
+
+        def executar(_: int) -> int:
+            barreira.wait()
+            return contexto._verificar_grafo_compartilhado()
+
+        with (
+            mock.patch.object(contexto, "raiz", return_value=str(REPOSITORIO)),
+            mock.patch.object(contexto.grafo, "verificar", side_effect=verificar) as chamada,
+            ThreadPoolExecutor(max_workers=8) as executor,
+        ):
+            resultados = list(executor.map(executar, range(8)))
+            posterior = contexto._verificar_grafo_compartilhado()
+
+        self.assertEqual([0] * 8, resultados)
+        self.assertEqual(0, posterior)
+        self.assertEqual(2, chamada.call_count)
+
+    def test_projeto_somente_sql_usa_cobertura_literal_sem_forjar_ast(self) -> None:
+        with mock.patch.object(grafo, "_cfg", return_value={
+            "extensoes_literais": [".sql"], "cobertura_minima": 1.0,
+        }):
+            metricas = grafo._validar_conteudo_grafo(
+                {"nodes": []}, {"schema.sql": "a" * 64}
+            )
+        self.assertEqual([], metricas["fontes_representadas"])
+        self.assertEqual(["schema.sql"], metricas["fontes_literais"])
+        self.assertEqual(1.0, metricas["cobertura_total"])
+
+    def test_extensao_estrutural_nao_pode_ser_rebaixada_para_literal(self) -> None:
+        with mock.patch.object(grafo, "_cfg", return_value={
+            "extensoes_literais": [".php"],
+        }):
+            with self.assertRaisesRegex(grafo.GrafoErro, "somente extensões sem AST"):
+                grafo._validar_conteudo_grafo(
+                    {"nodes": []}, {"index.php": "a" * 64}
+                )
 
 
 class BancosLocaisTest(unittest.TestCase):
@@ -1623,6 +1955,31 @@ class BancosLocaisTest(unittest.TestCase):
         self.assertIn("memória encontrada", consulta.stdout)
         self.assertIn("executar -> retorno", consulta.stdout)
 
+    def test_sql_sem_ast_fica_declarado_como_cobertura_literal(self) -> None:
+        sql = self.projeto / "src/schema.sql"
+        sql.write_text(
+            "CREATE TABLE pedidos (id INTEGER PRIMARY KEY);\n", encoding="utf-8"
+        )
+
+        sincronizar = self.cli("bancos", "sincronizar")
+        marcador = json.loads(
+            (self.projeto / ".memoria/bancos/graphify.json").read_text(encoding="utf-8")
+        )
+        contexto_sql = self.cli(
+            "contexto", "--pergunta=CREATE TABLE pedidos", "--perfil=engenharia-leitura",
+            "--json",
+        )
+
+        self.assertEqual(0, sincronizar.returncode, sincronizar.stdout + sincronizar.stderr)
+        self.assertIn("src/schema.sql", marcador["fontes_literais"])
+        self.assertEqual([], marcador["fontes_sem_cobertura"])
+        self.assertEqual(1.0, marcador["cobertura_estrutural"])
+        self.assertEqual(1.0, marcador["cobertura_total"])
+        self.assertEqual(0, contexto_sql.returncode, contexto_sql.stdout + contexto_sql.stderr)
+        codigo = json.loads(contexto_sql.stdout)["codigo"]
+        self.assertTrue(codigo[0]["source_uri"].startswith("src/schema.sql#"), codigo)
+        self.assertIn("literal-codigo", codigo[0]["estrategias"])
+
     def test_sinal_semantico_generico_nao_expulsa_match_literal_exato(self) -> None:
         sincronizar = self.cli("bancos", "sincronizar")
         self.texto_recall = (self.projeto / "docs/PROJETO.md").read_text(encoding="utf-8")
@@ -1641,6 +1998,51 @@ class BancosLocaisTest(unittest.TestCase):
             "docs/runbooks/documentacao-autonoma.md#execução-por-cron"
         ))
         self.assertIn("literal", envelope["fontes"][0]["estrategias"])
+
+    def test_nos_repetidos_na_mesma_linha_nao_inflam_ranking_do_codigo(self) -> None:
+        (self.projeto / "src/faturamento.py").write_text(
+            "def executar_faturamento():\n    return 'faturamento'\n", encoding="utf-8"
+        )
+        falso = self.projeto / "fake_graphify.py"
+        nos = [
+            {
+                "id": f"generico-{i}", "name": "onde busca implementada",
+                "source_file": "src/app.py", "start_line": 1,
+            }
+            for i in range(30)
+        ] + [
+            {
+                "id": "faturamento", "name": "executar_faturamento",
+                "source_file": "src/faturamento.py", "start_line": 1,
+            },
+            {
+                "id": "ferramenta", "name": "fake_graphify",
+                "source_file": "fake_graphify.py", "start_line": 1,
+            },
+        ]
+        falso.write_text(
+            "import json, sys\n"
+            "from pathlib import Path\n"
+            "if sys.argv[1] == '--version': print('fake-graphify 2.0')\n"
+            "elif sys.argv[1] in ('extract', 'update'):\n"
+            " out=Path('graphify-out'); out.mkdir(exist_ok=True)\n"
+            f" (out/'graph.json').write_text(json.dumps({{'nodes': {nos!r}, 'links': []}}), encoding='utf-8')\n"
+            "elif sys.argv[1] == 'query': print('faturamento')\n"
+            "else: raise SystemExit(2)\n",
+            encoding="utf-8",
+        )
+
+        sincronizar = self.cli("bancos", "sincronizar")
+        resposta = self.cli(
+            "contexto", "--pergunta=onde está implementada a busca de faturamento?",
+            "--perfil=engenharia-leitura", "--json",
+        )
+
+        self.assertEqual(0, sincronizar.returncode, sincronizar.stdout + sincronizar.stderr)
+        self.assertEqual(0, resposta.returncode, resposta.stdout + resposta.stderr)
+        codigo = json.loads(resposta.stdout)["codigo"]
+        self.assertTrue(codigo, resposta.stdout)
+        self.assertTrue(codigo[0]["source_uri"].startswith("src/faturamento.py#"), codigo)
 
     def test_retain_redige_dados_e_exclui_documento_secreto_antes_do_envio(self) -> None:
         (self.projeto / "docs/funcional/FDD-DADOS.md").write_text(
@@ -1985,6 +2387,261 @@ class BancosLocaisTest(unittest.TestCase):
         self.assertEqual(1, status.returncode, status.stdout + status.stderr)
         self.assertIn("marcador do Graphify inválido", status.stdout)
         self.assertNotIn("Traceback", status.stdout + status.stderr)
+
+
+class CicloAutonomoTest(unittest.TestCase):
+    def test_inicio_verde_nao_reescreve_documentacao(self) -> None:
+        canary = {"ok": True, "falhas": [], "frescor": "confirmado"}
+        with (
+            mock.patch.object(ciclo, "_cfg", return_value={"auto_reparar_no_inicio": True}),
+            mock.patch.object(ciclo.adaptadores, "_plataformas", return_value=("codex",)),
+            mock.patch.object(
+                ciclo.adaptadores, "_perfil_canary", return_value="engenharia-leitura"
+            ),
+            mock.patch.object(ciclo.provisao, "garantir", return_value={"ok": True}),
+            mock.patch.object(ciclo.adaptadores, "canary", return_value=(0, canary)),
+            mock.patch.object(ciclo.documentar, "executar") as documentar,
+        ):
+            rc, saida = ciclo.executar("iniciar", "codex", "engenharia-leitura")
+
+        self.assertEqual(0, rc)
+        self.assertTrue(saida["ok"])
+        self.assertFalse(saida["auto_reparado"])
+        self.assertFalse(saida["publicado"])
+        self.assertFalse(saida["commit_criado"])
+        documentar.assert_not_called()
+
+    def test_inicio_velho_repara_e_repete_canary_sem_decisao_humana(self) -> None:
+        velho = {"ok": False, "falhas": ["frescor não confirmado"]}
+        novo = {"ok": True, "falhas": [], "frescor": "confirmado"}
+        with (
+            mock.patch.object(ciclo, "_cfg", return_value={"auto_reparar_no_inicio": True}),
+            mock.patch.object(ciclo.adaptadores, "_plataformas", return_value=("claude",)),
+            mock.patch.object(
+                ciclo.adaptadores, "_perfil_canary", return_value="engenharia-leitura"
+            ),
+            mock.patch.object(ciclo.provisao, "garantir", return_value={"ok": True}),
+            mock.patch.object(ciclo, "_lock_mutacao", return_value=mock.MagicMock()),
+            mock.patch.object(
+                ciclo.adaptadores, "canary", side_effect=[(1, velho), (0, novo)]
+            ) as canary,
+            mock.patch.object(ciclo.documentar, "executar", return_value=0) as documentar,
+        ):
+            rc, saida = ciclo.executar("iniciar", "claude", "engenharia-leitura")
+
+        self.assertEqual(0, rc)
+        self.assertTrue(saida["ok"])
+        self.assertTrue(saida["auto_reparado"])
+        self.assertEqual(2, canary.call_count)
+        documentar.assert_called_once_with()
+
+    def test_atualizar_falha_fechada_sem_canary_quando_documentacao_falha(self) -> None:
+        with (
+            mock.patch.object(ciclo, "_cfg", return_value={"auto_reparar_no_inicio": True}),
+            mock.patch.object(ciclo.adaptadores, "_plataformas", return_value=("hermes",)),
+            mock.patch.object(
+                ciclo.adaptadores, "_perfil_canary", return_value="engenharia-leitura"
+            ),
+            mock.patch.object(ciclo.provisao, "garantir", return_value={"ok": True}),
+            mock.patch.object(ciclo, "_lock_mutacao", return_value=mock.MagicMock()),
+            mock.patch.object(ciclo.documentar, "executar", return_value=1),
+            mock.patch.object(ciclo.adaptadores, "canary") as canary,
+        ):
+            rc, saida = ciclo.executar("atualizar", "hermes", "engenharia-leitura")
+
+        self.assertEqual(1, rc)
+        self.assertFalse(saida["ok"])
+        self.assertIn("atualização documental", saida["erro"])
+        canary.assert_not_called()
+
+    def test_identidade_invalida_e_recusada_antes_dos_provedores(self) -> None:
+        with (
+            mock.patch.object(ciclo, "_cfg", return_value={"auto_reparar_no_inicio": True}),
+            mock.patch.object(ciclo.adaptadores, "_plataformas", return_value=("codex",)),
+            mock.patch.object(
+                ciclo.adaptadores, "_perfil_canary", return_value="engenharia-leitura"
+            ),
+            mock.patch.object(ciclo.provisao, "garantir") as garantir,
+        ):
+            rc, saida = ciclo.executar("iniciar", "plataforma-inventada", "engenharia-leitura")
+
+        self.assertEqual(1, rc)
+        self.assertFalse(saida["ok"])
+        self.assertIn("plataforma não declarada", saida["erro"])
+        garantir.assert_not_called()
+
+    def test_configuracao_invalida_retorna_falha_controlada(self) -> None:
+        with mock.patch.object(ciclo, "_cfg", side_effect=provisao.ProvisaoErro("inválida")):
+            rc, saida = ciclo.executar("iniciar", "codex", "engenharia-leitura")
+
+        self.assertEqual(1, rc)
+        self.assertEqual("inválida", saida["erro"])
+
+    def test_agendador_executa_somente_ciclo_fechado(self) -> None:
+        configuracao = {
+            "adaptadores": {
+                "plataformas": ["codex", "claude"],
+                "perfil_canary": "engenharia-leitura",
+            }
+        }
+        ciclo_saida = {
+            "schema": 1, "ok": True, "publicado": False,
+            "commit_criado": False, "erro": None,
+        }
+        with (
+            mock.patch.object(agendador, "_cfg", return_value={"horario_local": "02:15"}),
+            mock.patch.object(agendador, "config", return_value=configuracao),
+            mock.patch.object(agendador.ciclo, "executar", return_value=(0, ciclo_saida)) as executar,
+        ):
+            rc, saida = agendador.executar()
+
+        self.assertEqual(0, rc)
+        executar.assert_called_once_with("atualizar", "codex", "engenharia-leitura")
+        self.assertEqual("nao_acessado", saida["banco_negocio"])
+        self.assertFalse(saida["publicado"])
+        self.assertFalse(saida["commit_criado"])
+
+    def test_agendador_windows_registra_comando_fixo_sem_shell_ou_banco(self) -> None:
+        cfg = {"horario_local": "02:15"}
+        script = Path("C:/projeto/.memoria/agendador/atualizar.ps1")
+        _, argumentos_esperados = agendador._acao_windows(script)
+        xml = (
+            '<?xml version="1.0"?><Task xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">'
+            '<Triggers><CalendarTrigger><StartBoundary>2026-08-19T02:15:00</StartBoundary>'
+            '<ScheduleByDay><DaysInterval>1</DaysInterval></ScheduleByDay></CalendarTrigger></Triggers>'
+            '<Actions><Exec><Command>powershell.exe</Command>'
+            f'<Arguments>{argumentos_esperados}</Arguments></Exec></Actions></Task>'
+        )
+        respostas = [
+            subprocess.CompletedProcess([], 0, "", ""),
+            subprocess.CompletedProcess([], 0, xml, ""),
+        ]
+        with (
+            mock.patch.object(agendador, "_cfg", return_value=cfg),
+            mock.patch.object(agendador.os, "name", "nt"),
+            mock.patch.object(agendador, "_nome_tarefa", return_value="MemoriaEvolutiva-teste-123"),
+            mock.patch.object(agendador, "_estado", return_value=script.parent),
+            mock.patch.object(agendador, "_subprocess", side_effect=respostas) as rodar,
+        ):
+            agendador._registrar(script)
+            registrado = agendador._status_sistema()
+
+        self.assertTrue(registrado)
+        comando = rodar.call_args_list[0].args[0]
+        self.assertEqual("schtasks.exe", comando[0])
+        self.assertIn("/SC", comando)
+        self.assertIn("DAILY", comando)
+        self.assertIn("/ST", comando)
+        self.assertIn("02:15", comando)
+        unido = " ".join(comando).lower()
+        for proibido in ("mysql", "mysqli", "pdo", "psql", "postgres", "sqlcmd", "db_host"):
+            self.assertNotIn(proibido, unido)
+
+    def test_agendador_status_reprova_acao_windows_adulterada(self) -> None:
+        xml = (
+            '<?xml version="1.0"?><Task><Triggers><CalendarTrigger>'
+            '<StartBoundary>2026-08-19T02:15:00</StartBoundary><ScheduleByDay>'
+            '<DaysInterval>1</DaysInterval></ScheduleByDay></CalendarTrigger></Triggers>'
+            '<Actions><Exec><Command>cmd.exe</Command><Arguments>/c outro-job</Arguments>'
+            '</Exec></Actions></Task>'
+        )
+        with (
+            mock.patch.object(agendador, "_cfg", return_value={"horario_local": "02:15"}),
+            mock.patch.object(agendador.os, "name", "nt"),
+            mock.patch.object(
+                agendador, "_subprocess",
+                return_value=subprocess.CompletedProcess([], 0, xml, ""),
+            ),
+        ):
+            self.assertFalse(agendador._status_sistema())
+
+    def test_agendador_windows_nao_confunde_acesso_negado_com_tarefa_ausente(self) -> None:
+        respostas = [
+            subprocess.CompletedProcess([], 1, "", "acesso negado"),
+            subprocess.CompletedProcess([], 0, "tarefa existe", ""),
+        ]
+        with (
+            mock.patch.object(agendador.os, "name", "nt"),
+            mock.patch.object(agendador, "_subprocess", side_effect=respostas),
+        ):
+            with self.assertRaisesRegex(agendador.AgendadorErro, "recusou a remoção"):
+                agendador._remover()
+
+    def test_agendador_posix_substitui_apenas_linha_gerenciada(self) -> None:
+        cfg = {"horario_local": "02:15"}
+        respostas = [
+            subprocess.CompletedProcess([], 0, "0 1 * * * /outro/job\n", ""),
+            subprocess.CompletedProcess([], 0, "", ""),
+        ]
+        with (
+            mock.patch.object(agendador, "_cfg", return_value=cfg),
+            mock.patch.object(agendador.os, "name", "posix"),
+            mock.patch.object(agendador, "_marcador_cron", return_value="# memoria-evolutiva:abc"),
+            mock.patch.object(agendador, "_subprocess", side_effect=respostas) as rodar,
+        ):
+            agendador._registrar(Path("/projeto/.memoria/agendador/atualizar.sh"))
+
+        conteudo = rodar.call_args_list[1].kwargs["entrada"]
+        self.assertIn("0 1 * * * /outro/job", conteudo)
+        self.assertIn("15 02 * * *", conteudo)
+        self.assertIn("# memoria-evolutiva:abc", conteudo)
+        self.assertNotIn("mysql", conteudo.lower())
+
+    def test_scripts_do_agendador_nao_contem_acesso_ao_banco_de_negocio(self) -> None:
+        with mock.patch.object(agendador, "_base", return_value=Path("C:/projeto")):
+            textos = [
+                agendador._script_windows()[1], agendador._script_posix()[1],
+                agendador._runner()[1],
+            ]
+        self.assertIn("agendador", textos[2])
+        self.assertIn("executar", textos[2])
+        self.assertIn("--json", textos[2])
+        for texto in textos:
+            for proibido in ("mysql", "mysqli", "pdo", "psql", "postgres", "sqlcmd", "db_host"):
+                self.assertNotIn(proibido, texto.lower())
+
+    def test_provisao_inicia_daemon_somente_no_loopback_padrao(self) -> None:
+        cfg = {
+            "iniciar_hindsight_embed": True,
+            "timeout_inicializacao_segundos": 10,
+        }
+        processo = subprocess.CompletedProcess([], 0, "", "")
+        with (
+            mock.patch.object(provisao, "_executavel", return_value="hindsight-embed"),
+            mock.patch.object(provisao.subprocess, "run", return_value=processo) as rodar,
+            mock.patch.object(provisao, "_porta_aberta", return_value=True),
+            mock.patch.object(provisao, "raiz", return_value="C:/projeto"),
+        ):
+            comando = provisao._iniciar_hindsight("http://127.0.0.1:8888", cfg)
+
+        self.assertEqual("hindsight-embed", comando)
+        self.assertEqual(
+            ["hindsight-embed", "daemon", "start"], rodar.call_args.args[0]
+        )
+
+        with self.assertRaises(provisao.ProvisaoErro):
+            provisao._iniciar_hindsight("https://memoria.exemplo:8888", cfg)
+        with self.assertRaises(provisao.ProvisaoErro):
+            provisao._iniciar_hindsight("http://127.0.0.1:8888?token=privado", cfg)
+
+    def test_provisao_nao_devolve_endpoint_que_possa_conter_segredo(self) -> None:
+        projeto = {
+            "memoria": {"ativo": True},
+            "grafo": {"ativo": False},
+        }
+        with (
+            mock.patch.object(provisao, "_cfg", return_value={"ativo": True}),
+            mock.patch.object(provisao, "config", return_value=projeto),
+            mock.patch.object(
+                provisao.hindsight, "_endpoint",
+                return_value="http://127.0.0.1:8888?token=privado",
+            ),
+            mock.patch.object(provisao, "_porta_aberta", return_value=True),
+        ):
+            saida = provisao.garantir()
+
+        self.assertNotIn("endpoint", saida["hindsight"])
+        self.assertNotIn("privado", repr(saida))
 
 
 class ArtefatosDistribuidosTest(unittest.TestCase):

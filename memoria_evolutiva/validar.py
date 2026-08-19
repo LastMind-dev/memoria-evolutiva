@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import contextlib
 import io
+import re
 import tempfile
 from pathlib import Path
 
@@ -75,6 +76,18 @@ def main() -> int:
             erros.append("padrao.json: o banco documental padrão é `hindsight` em modo `local`")
         if not memoria.get("endpoint") or not memoria.get("banco"):
             erros.append("padrao.json: Hindsight exige `endpoint` e `banco`")
+        if memoria.get("consulta_budget", "mid") not in {"low", "mid", "high"}:
+            erros.append("padrao.json: `memoria.consulta_budget` precisa ser low, mid ou high")
+        for chave, padrao, minimo, maximo in (
+            ("consultas_paralelas", 2, 1, 32),
+            ("cache_consulta_ttl_segundos", 30, 0, 3600),
+        ):
+            valor = memoria.get(chave, padrao)
+            if isinstance(valor, bool) or not isinstance(valor, int) or not minimo <= valor <= maximo:
+                erros.append(
+                    f"padrao.json: `memoria.{chave}` precisa ser inteiro entre "
+                    f"{minimo} e {maximo}"
+                )
     if grafo.get("ativo"):
         if grafo.get("obrigatorio") is not True:
             erros.append("padrao.json: Graphify ativo exige `grafo.obrigatorio: true`")
@@ -82,6 +95,11 @@ def main() -> int:
             erros.append("padrao.json: o grafo de código padrão é `graphify` em modo `local`")
         if not grafo.get("comando") or not grafo.get("arquivo") or not grafo.get("marcador"):
             erros.append("padrao.json: Graphify exige `comando`, `arquivo` e `marcador`")
+        literais = grafo.get("extensoes_literais", [".sql"])
+        if literais != [".sql"]:
+            erros.append(
+                "padrao.json: `grafo.extensoes_literais` precisa ser exatamente ['.sql']"
+            )
 
     contexto = c.get("contexto", {})
     if contexto:
@@ -138,6 +156,56 @@ def main() -> int:
         manifesto_adaptadores = adaptadores.get("manifesto")
         if not isinstance(manifesto_adaptadores, str) or not manifesto_adaptadores.endswith(".json"):
             erros.append("padrao.json: `adaptadores.manifesto` precisa ser caminho JSON")
+
+    ciclo = c.get("ciclo", {})
+    contrato_ciclo = {
+        "ativo": True,
+        "auto_reparar_no_inicio": True,
+        "iniciar_hindsight_embed": True,
+        "mutacao_externa": "somente-bancos-locais",
+        "publicacao_automatica": False,
+    }
+    if not isinstance(ciclo, dict):
+        erros.append("padrao.json: `ciclo` precisa ser objeto")
+    else:
+        for chave, valor in contrato_ciclo.items():
+            if ciclo.get(chave) != valor:
+                erros.append(
+                    f"padrao.json: `ciclo.{chave}` precisa ser {valor!r} no ciclo autônomo"
+                )
+        timeout_ciclo = ciclo.get("timeout_inicializacao_segundos", 180)
+        if (isinstance(timeout_ciclo, bool) or not isinstance(timeout_ciclo, int)
+                or not 10 <= timeout_ciclo <= 600):
+            erros.append(
+                "padrao.json: `ciclo.timeout_inicializacao_segundos` precisa ser "
+                "inteiro entre 10 e 600"
+            )
+
+    agendamento = c.get("agendamento", {})
+    contrato_agendamento = {
+        "ativo": True,
+        "registrar_na_instalacao": True,
+        "frequencia": "diaria",
+        "comando": "memoria-agendador-v1",
+        "banco_negocio": "proibido",
+        "publicacao_automatica": False,
+    }
+    if not isinstance(agendamento, dict):
+        erros.append("padrao.json: `agendamento` precisa ser objeto")
+    else:
+        for chave, valor in contrato_agendamento.items():
+            if agendamento.get(chave) != valor:
+                erros.append(
+                    f"padrao.json: `agendamento.{chave}` precisa ser {valor!r} "
+                    "na manutenção zero-touch"
+                )
+        horario = agendamento.get("horario_local", "02:15")
+        if not isinstance(horario, str) or not re.fullmatch(
+            r"(?:[01]\d|2[0-3]):[0-5]\d", horario
+        ):
+            erros.append(
+                "padrao.json: `agendamento.horario_local` precisa usar HH:MM entre 00:00 e 23:59"
+            )
 
     executor = c.get("executor", {})
     contrato_executor = {

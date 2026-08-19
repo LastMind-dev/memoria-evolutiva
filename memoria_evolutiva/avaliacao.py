@@ -16,7 +16,7 @@ import unicodedata
 from pathlib import Path
 
 from . import contexto, fragmentos, seguranca
-from .lib import config, raiz, relativo, titulo
+from .lib import config, raiz, relativo, sha256_canonico, titulo
 
 
 SCHEMA = 1
@@ -35,7 +35,7 @@ _ULTIMA_FALHA: str | None = None
 
 
 def _sha_bytes(conteudo: bytes) -> str:
-    return hashlib.sha256(conteudo).hexdigest()
+    return sha256_canonico(conteudo)
 
 
 def _sha_obj(valor: object) -> str:
@@ -333,6 +333,31 @@ def _agrupar(casos: list[dict], chave: str) -> dict[str, dict]:
     }
 
 
+def _prontidao(casos: list[dict]) -> dict[str, dict]:
+    resultado: dict[str, dict] = {}
+    for categoria in sorted(CATEGORIAS):
+        grupo = [caso for caso in casos if caso["categoria"] == categoria]
+        positivos = [caso for caso in grupo if not caso["espera_sem_fonte"]]
+        reprovados = sorted(caso["id"] for caso in grupo if not caso["ok"])
+        if not positivos:
+            motivo = "sem_corpus_positivo_autorizado"
+            pronta = False
+        elif reprovados:
+            motivo = "casos_reprovados"
+            pronta = False
+        else:
+            motivo = "casos_positivos_autorizados_aprovados"
+            pronta = True
+        resultado[categoria] = {
+            "pronta": pronta,
+            "motivo": motivo,
+            "casos_positivos": len(positivos),
+            "casos_negativos": len(grupo) - len(positivos),
+            "casos_reprovados": reprovados,
+        }
+    return resultado
+
+
 def _perfil_rag() -> dict:
     manifesto = fragmentos._manifesto_path()
     try:
@@ -375,6 +400,7 @@ def _relatorio_base() -> dict:
             "por_perfil": _agrupar(resultados, "perfil"),
             "por_categoria": _agrupar(resultados, "categoria"),
         },
+        "prontidao": _prontidao(resultados),
         "casos": resultados,
         "promocoes_candidatas": sorted(promocoes, key=lambda item: item["fonte"]),
     }
@@ -523,7 +549,15 @@ def _aplicar_gate(relatorio: dict, baseline: dict | None) -> dict:
         if baseline.get("projeto") != relatorio["projeto"]:
             erros.append("projeto do baseline diverge")
         if baseline.get("corpus_sha256") != relatorio["corpus_sha256"]:
-            erros.append("corpus mudou; rode `memoria avaliar medir` deliberadamente")
+            # Versões anteriores calculavam bytes físicos. Em um checkout CRLF, o
+            # mesmo corpus recebia outro hash. Aceite somente essa identidade legada
+            # exata; qualquer mudança real continua exigindo remedição deliberada.
+            try:
+                legado_fisico = hashlib.sha256(corpus_path().read_bytes()).hexdigest()
+            except OSError:
+                legado_fisico = ""
+            if baseline.get("corpus_sha256") != legado_fisico:
+                erros.append("corpus mudou; rode `memoria avaliar medir` deliberadamente")
         contagens = ("casos", "positivos", "negativos")
         for dimensao in ("global", "por_perfil", "por_categoria"):
             atual_dimensao = relatorio["metricas"][dimensao]
@@ -598,6 +632,7 @@ def _manifesto(relatorio: dict) -> dict:
         "corpus_sha256": relatorio["corpus_sha256"],
         "perfil_rag": relatorio["perfil_rag"],
         "metricas": relatorio["metricas"],
+        "prontidao": relatorio["prontidao"],
         "drift": relatorio["drift"],
         "gate": relatorio["gate"],
         "promocoes_candidatas": relatorio["promocoes_candidatas"],
@@ -642,6 +677,9 @@ def medir(silencioso: bool = False) -> int:
         titulo("Avaliação RAG — baseline medido")
         print(f"  {relativo(str(baseline_path()))}")
         print(f"  {len(relatorio['casos'])} casos · gate aprovado")
+        for categoria, estado in relatorio["prontidao"].items():
+            rotulo = "pronto" if estado["pronta"] else "bloqueado"
+            print(f"  {categoria}: {rotulo} · {estado['motivo']}")
     return 0
 
 
@@ -660,6 +698,9 @@ def gerar(silencioso: bool = False) -> int:
     if not silencioso:
         titulo("Avaliação RAG — evolução mensurada")
         print(f"  {len(relatorio['casos'])} casos · hit@1 {relatorio['metricas']['global']['hit_1']}")
+        for categoria, estado in relatorio["prontidao"].items():
+            rotulo = "pronto" if estado["pronta"] else "bloqueado"
+            print(f"  {categoria}: {rotulo} · {estado['motivo']}")
         for erro in relatorio["gate"]["erros"]:
             print(f"  ERRO — {erro}")
     if not relatorio["gate"]["aprovado"]:
@@ -691,6 +732,9 @@ def verificar(silencioso: bool = False) -> int:
             f"hit@1 {relatorio['metricas']['global']['hit_1']} · "
             f"hit@3 {relatorio['metricas']['global']['hit_3']}"
         )
+        for categoria, estado in relatorio["prontidao"].items():
+            rotulo = "pronto" if estado["pronta"] else "bloqueado"
+            print(f"  {categoria}: {rotulo} · {estado['motivo']}")
     return 0
 
 

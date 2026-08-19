@@ -7,7 +7,6 @@ inteiros já mantidos no Hindsight.
 
 from __future__ import annotations
 
-import hashlib
 import json
 import os
 import re
@@ -16,7 +15,7 @@ import unicodedata
 from pathlib import Path
 
 from . import indice, seguranca
-from .lib import barras, config, frontmatter, raiz, relativo, titulo
+from .lib import barras, config, frontmatter, raiz, relativo, sha256_canonico, titulo
 
 
 ALGORITMO = "markdown-secoes-v2-acl"
@@ -28,8 +27,7 @@ class FragmentosErro(RuntimeError):
 
 
 def _sha256(dados: bytes | str) -> str:
-    bruto = dados.encode("utf-8") if isinstance(dados, str) else dados
-    return hashlib.sha256(bruto).hexdigest()
+    return sha256_canonico(dados)
 
 
 def _cfg() -> dict:

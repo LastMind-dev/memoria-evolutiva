@@ -13,3 +13,6 @@ graphify-out/stat-index.json
 
 # memoria-evolutiva: estado local do executor
 .memoria/executor/
+
+# memoria-evolutiva: scripts e logs locais do agendador
+.memoria/agendador/

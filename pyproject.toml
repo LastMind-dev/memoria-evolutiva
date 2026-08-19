@@ -15,6 +15,12 @@ keywords = ["documentation", "adr", "prd", "docs-as-code", "llm", "memoria-evolu
 [project.scripts]
 memoria = "memoria_evolutiva.__main__:main"
 
+[project.optional-dependencies]
+local = [
+    "graphifyy>=0.9.46,<0.10",
+    "hindsight-embed>=0.9.1,<0.10",
+]
+
 [tool.setuptools]
 packages = ["memoria_evolutiva"]
 

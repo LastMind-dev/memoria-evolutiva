@@ -5,10 +5,10 @@ depois, esta é a canônica e a PHP fica arquivada). Tudo aqui existe porque foi
 produção pelo menos uma vez — os comentários dizem qual. Apagar o comentário costuma ser
 o primeiro passo para o bug voltar.
 
-COMPATIBILIDADE É CONTRATO: `hash_do_conteudo`, o formato do baseline, o formato do
-marcador e as mensagens de erro precisam ser IDÊNTICOS aos da versão PHP — os marcadores
-e baselines dos projetos existentes foram gravados por ela, e um hash diferente
-invalidaria todos sem que nada tenha mudado de verdade.
+COMPATIBILIDADE É CONTRATO: `hash_do_conteudo` preserva o algoritmo legado; identidades
+de arquivo persistidas canonizam LF/CRLF e os leitores aceitam a identidade física
+legada somente quando ela prova exatamente o arquivo atual. Uma migração nunca pode
+invalidar todos os projetos sem que o conteúdo tenha mudado de verdade.
 """
 
 from __future__ import annotations
@@ -33,6 +33,34 @@ def barras(caminho: str) -> str:
     num documento.
     """
     return caminho.replace("\\", "/")
+
+
+def bytes_canonicos(conteudo: bytes) -> bytes:
+    """Normaliza LF/CRLF em texto UTF-8 antes de calcular identidade.
+
+    Git pode materializar o mesmo blob com finais de linha diferentes conforme o
+    sistema operacional e ``core.autocrlf``. Binários e textos fora de UTF-8 continuam
+    sendo provados byte a byte.
+    """
+    if b"\0" in conteudo:
+        return conteudo
+    try:
+        texto = conteudo.decode("utf-8")
+    except UnicodeDecodeError:
+        return conteudo
+    return texto.replace("\r\n", "\n").replace("\r", "\n").encode("utf-8")
+
+
+def sha256_canonico(conteudo: bytes | str) -> str:
+    """SHA-256 portátil para texto e estrito para conteúdo binário."""
+    bruto = conteudo.encode("utf-8") if isinstance(conteudo, str) else conteudo
+    return hashlib.sha256(bytes_canonicos(bruto)).hexdigest()
+
+
+def identidade_arquivo(arquivo: Path) -> tuple[int, str]:
+    """Tamanho e SHA-256 canônicos usados por derivados persistidos."""
+    canonico = bytes_canonicos(arquivo.read_bytes())
+    return len(canonico), hashlib.sha256(canonico).hexdigest()
 
 
 @lru_cache(maxsize=1)

@@ -14,7 +14,7 @@ ancoras:
 
 ## Algoritmo obrigatório
 
-1. Rode `memoria documentar`; ele atualiza documentação, Hindsight e Graphify.
+1. No início, rode `memoria ciclo iniciar --plataforma=PLATAFORMA --perfil=engenharia-leitura --json`; ele prepara os provedores, confirma o canary e repara estado velho.
 2. Consulte o gateway com `memoria contexto --pergunta="..." --perfil=engenharia-leitura --json` antes de
    abrir arquivos brutos.
 3. Confirme que cada fonte relevante aparece no manifesto; ajuste `gerado.raiz` e
@@ -27,7 +27,7 @@ ancoras:
    `indeterminado`; nunca uma explicação plausível inventada.
 7. Conflito é resolvido pela fonte superior. Empate sem condição observável mantém os
    dois comportamentos documentados e o ponto fica `indeterminado`.
-8. Rode `memoria documentar` novamente. Só encerre com os dois bancos, validação e
+8. Rode `memoria ciclo atualizar --plataforma=PLATAFORMA --perfil=engenharia-leitura --json`. Só encerre com os dois bancos, validação e
    autoteste verdes. A catraca `memoria avaliar verificar` precisa manter hit@1, hit@3,
    cobertura de citação, cobertura da resposta e taxa sem fonte dentro do baseline.
 
@@ -36,9 +36,12 @@ banco, ambiente remoto ou ação irreversível continua sendo uma fronteira sepa
 
 ## Execução por cron
 
-Use `memoria executar --run-id=ID --acao=documentar --json`. O executor aplica lock,
-checkpoints e worktree própria; não cria commit nem publica. Capacidade ausente em
-`padrao.json` é negada antes do efeito.
+A instalação completa registra `memoria agendador executar --json` diariamente às
+02:15. Confirme com `memoria agendador status --json`. O comando é fechado: atualiza
+somente documentação, Hindsight e Graphify sob o lock comum; não aceita shell ou SQL,
+não acessa o banco de negócio, não cria commit e não publica. Para produzir um patch
+isolado e retomável sob demanda, use o executor com um `run-id` explícito; ele mantém
+checkpoints e usa worktree própria.
 
 ## Evolução mensurada
 

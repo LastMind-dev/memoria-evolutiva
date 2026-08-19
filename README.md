@@ -18,15 +18,15 @@ sabe onde o projeto está. E se todas as ferramentas de IA sumirem, a memória c
 ## Instalar
 
 ```bash
-pipx install git+https://github.com/LastMind-dev/memoria-evolutiva.git@main
+pipx install --include-deps "memoria-evolutiva[local] @ git+https://github.com/LastMind-dev/memoria-evolutiva.git@main"
 cd meu-projeto
 memoria instalar --projeto="meu-app" --codigo=src
 ```
 
-Pré-requisitos do fluxo completo: Hindsight local respondendo em
-`http://127.0.0.1:8888` e o executável `graphify` (pacote `graphifyy`) no PATH. O
-instalador falha objetivamente se algum deles não confirmar gravação; não pede que uma
-pessoa julgue o resultado.
+O extra `local` traz Hindsight Embed e Graphify na mesma instalação. O perfil global do
+Hindsight ou as variáveis `HINDSIGHT_API_LLM_*` continuam definindo o modelo sem
+acoplá-lo ao projeto. O instalador inicia o daemon local sob demanda e falha
+objetivamente se algum provedor não confirmar; não pede que uma pessoa julgue o resultado.
 
 O instalador publica a árvore, detecta as linguagens presentes, calcula a cobertura
 integral dos bytes de cada fonte configurada, gera o núcleo estrutural, congela a primeira linha de base, valida e
@@ -48,9 +48,12 @@ evolutivos preservados ou para PRD/FDD/HLD/LLD/ADR; sem prova, usa `indeterminad
 Conteúdo preexistente do núcleo é arquivado em `.memoria/legado-documentacao/` antes de
 o documento gerenciado assumir a jurisdição; demais documentos não são sobrescritos.
 
-Depois de instalar, a manutenção inteira cabe em um comando:
+Depois de instalar, a manutenção usa dois gatilhos objetivos:
 
 ```bash
+memoria ciclo iniciar --plataforma=codex --perfil=engenharia-leitura --json
+memoria ciclo atualizar --plataforma=codex --perfil=engenharia-leitura --json
+memoria agendador status --json  # tarefa diária criada pela instalação completa
 memoria documentar  # relê, documenta, valida e sincroniza Hindsight+Graphify
 memoria bancos consultar --pergunta="como funciona a autenticação?"
 memoria contexto --pergunta="como funciona a autenticação?" --perfil=engenharia-leitura --json
@@ -90,6 +93,11 @@ URLs de origem que contenham usuário ou senha não são propagadas para o workf
 | `memoria adaptadores gerar` | gera manifesto e entradas para cinco clientes sem copiar fatos | configuração ou arquivo do cliente é inválido |
 | `memoria adaptadores verificar` | confere schema, manifesto e conteúdo gerenciado | instrução ou conector foi adulterado/ficou velho |
 | `memoria adaptadores canary` | confirma projeto, bank, perfil, commit e frescor antes da consulta | qualquer identidade ou provedor ativo não confirma |
+| `memoria ciclo iniciar` | prepara os provedores, faz canary e auto-repara estado velho | dependência, documentação, banco ou identidade não confirma |
+| `memoria ciclo atualizar` | documenta, valida, sincroniza e repete o canary após mudanças | qualquer etapa do ciclo não confirma |
+| `memoria agendador instalar` | registra atualização diária fechada às 02:15 | o agendador do usuário recusa o registro |
+| `memoria agendador status` | confirma a tarefa identificada deste projeto | tarefa ausente ou configuração insegura |
+| `memoria agendador executar` | atualiza docs, Hindsight e Graphify sob lock compartilhado | ciclo, banco de memória, grafo ou canary falha |
 | `memoria indice` | compatibilidade: verifica a cópia documental no Hindsight | documento do núcleo mudou |
 | `memoria verificar` | estrutura + catraca + bancos + frescor da skill gerada | qualquer etapa falha |
 | `memoria autoteste` | quebra uma cópia de propósito e confere que os validadores reclamam | um validador parou de pegar o que promete |
@@ -149,6 +157,7 @@ kit não chegava a projeto nenhum.
 | [`BANCOS.md`](BANCOS.md) | contrato implementado de Hindsight local + Graphify, confirmação e frescor |
 | [`CONTEXTO.md`](CONTEXTO.md) | gateway neutro, perfis, envelope JSON e transportes CLI/MCP/HTTP |
 | [`ADAPTADORES.md`](ADAPTADORES.md) | manifesto, descoberta e canary para Codex, Claude, Cursor, Windsurf e Hermes |
+| [`CICLO.md`](CICLO.md) | instalação única, bootstrap local e manutenção zero-touch comum aos agentes |
 | [`SEGURANCA-MEMORIA.md`](SEGURANCA-MEMORIA.md) | classificação, produto/tenant, audiência, redaction e fallback sem cobertura |
 | [`AVALIACAO-RAG.md`](AVALIACAO-RAG.md) | corpus, métricas, baseline, drift e promoção baseada em uso medido |
 | [`EVOLUCAO-RAG-AGENTES.md`](EVOLUCAO-RAG-AGENTES.md) | arquitetura-alvo e fases verificáveis para RAG portátil, atendimento e automações |
@@ -182,7 +191,7 @@ explícitas — o padrão normal exige os dois.
 A primeira implementação, em PHP, está arquivada em [`legado-php/`](legado-php/LEIA-ME.md)
 — congelada com paridade byte a byte comprovada contra o motor Python, funcional via
 `composer require lastmind-dev/memoria-evolutiva`, mas sem manutenção. Correções e regras
-novas entram só aqui. Para trocar de motor: `pipx install
-git+https://github.com/LastMind-dev/memoria-evolutiva.git@main`, depois
+novas entram só aqui. Para trocar de motor: `pipx install --include-deps
+"memoria-evolutiva[local] @ git+https://github.com/LastMind-dev/memoria-evolutiva.git@main"`, depois
 `memoria gerar` uma vez (a linha `> Gerado por ...` dos derivados muda) e `memoria
 verificar`.

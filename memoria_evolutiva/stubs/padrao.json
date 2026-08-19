@@ -114,6 +114,9 @@
         "banco": "meu-projeto",
         "api_key_env": null,
         "timeout_segundos": 300,
+        "consulta_budget": "mid",
+        "consultas_paralelas": 2,
+        "cache_consulta_ttl_segundos": 30,
         "assincrono_acima_de_bytes": 1000000,
         "intervalo_poll_segundos": 1,
         "confirmacoes_paralelas": 8,
@@ -182,6 +185,25 @@
             "hermes"
         ]
     },
+    "ciclo": {
+        "_leia": "Ciclo zero-touch compartilhado por todos os agentes. No início prepara provedores e repara somente a memória local; após mudanças atualiza documentação e bancos. Nunca cria commit nem publica.",
+        "ativo": true,
+        "auto_reparar_no_inicio": true,
+        "iniciar_hindsight_embed": true,
+        "timeout_inicializacao_segundos": 180,
+        "mutacao_externa": "somente-bancos-locais",
+        "publicacao_automatica": false
+    },
+    "agendamento": {
+        "_leia": "Manutenção diária fechada da memória. Executa somente documentação, Hindsight e Graphify; o banco de negócio é proibido. Nunca cria commit nem publica.",
+        "ativo": true,
+        "registrar_na_instalacao": true,
+        "frequencia": "diaria",
+        "horario_local": "02:15",
+        "comando": "memoria-agendador-v1",
+        "banco_negocio": "proibido",
+        "publicacao_automatica": false
+    },
     "executor": {
         "_leia": "Executor não interativo da Fase 5. Cada run usa branch/worktree própria, estado local ignorado pelo Git e capacidades negadas por padrão. Não faz commit, push nem publicação.",
         "ativo": true,
@@ -222,6 +244,9 @@
         ],
         "arquivo": "graphify-out/graph.json",
         "marcador": ".memoria/bancos/graphify.json",
+        "extensoes_literais": [
+            ".sql"
+        ],
         "cobertura_minima": 0.8,
         "reducao_maxima_percentual": 50,
         "timeout_segundos": 900

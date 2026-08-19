@@ -7,14 +7,16 @@ agente a operar por um contrato que o projeto já abandonou.
 
 from __future__ import annotations
 
-import hashlib
 import json
 import shutil
 from datetime import date
 from pathlib import Path
 
 from . import __version__
-from .lib import barras, commit_atual, hash_do_conteudo, pacote, raiz, relativo, titulo
+from .lib import (
+    barras, commit_atual, hash_do_conteudo, pacote, raiz, relativo,
+    sha256_canonico, titulo,
+)
 
 FONTES = {
     "docs/runbooks/sessao.md": "references/sessao-do-projeto.md",
@@ -60,7 +62,7 @@ def _fontes_efetivas() -> dict[str, str]:
 
 
 def _hash_arquivo(arquivo: Path) -> str:
-    return hashlib.sha256(arquivo.read_bytes()).hexdigest()
+    return sha256_canonico(arquivo.read_bytes())
 
 
 def _saida_registrada(saida: Path) -> str:

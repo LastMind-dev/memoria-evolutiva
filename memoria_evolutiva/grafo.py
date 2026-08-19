@@ -11,7 +11,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from .diagnosticar import PULAR
-from .lib import barras, commit_atual, config, raiz, titulo
+from .lib import barras, commit_atual, config, raiz, sha256_canonico, titulo
 
 
 # Mantida aqui para o grafo cobrir código de testes e ferramentas fora de `gerado.raiz`.
@@ -20,6 +20,7 @@ EXTENSOES = {
     ".kt", ".kts", ".php", ".py", ".rb", ".rs", ".scala", ".sh", ".sql",
     ".svelte", ".ts", ".tsx", ".vue",
 }
+EXTENSOES_LITERAIS_PERMITIDAS = {".sql"}
 PULAR_GRAFO = set(PULAR) | {"docs", "graphify-out"}
 
 
@@ -31,6 +32,37 @@ def _cfg() -> dict:
     return config().get("grafo", {})
 
 
+def _extensoes_literais() -> set[str]:
+    valor = _cfg().get("extensoes_literais", [".sql"])
+    if (not isinstance(valor, list) or len(valor) != len(set(valor))
+            or any(not isinstance(item, str) or item != item.lower()
+                   or item not in EXTENSOES_LITERAIS_PERMITIDAS for item in valor)):
+        raise GrafoErro(
+            "`grafo.extensoes_literais` aceita somente extensões sem AST "
+            "explicitamente suportadas: .sql"
+        )
+    return set(valor)
+
+
+def _executavel_uv(nome: str) -> str | None:
+    if Path(nome).name != nome:
+        return None
+    pastas = []
+    configurada = os.environ.get("UV_TOOL_BIN_DIR")
+    if configurada:
+        pastas.append(Path(configurada).expanduser())
+    pastas.append(Path.home() / ".local" / "bin")
+    nomes = [nome]
+    if os.name == "nt" and not nome.casefold().endswith(".exe"):
+        nomes.insert(0, nome + ".exe")
+    for pasta in pastas:
+        for candidato in nomes:
+            executavel = pasta / candidato
+            if executavel.is_file():
+                return str(executavel)
+    return None
+
+
 def _comando() -> list[str]:
     valor = _cfg().get("comando", ["graphify"])
     if isinstance(valor, str):
@@ -38,7 +70,11 @@ def _comando() -> list[str]:
     if not isinstance(valor, list) or not valor or not all(isinstance(v, str) and v for v in valor):
         raise GrafoErro("`grafo.comando` precisa ser uma lista de argumentos não vazios")
     primeiro = os.environ.get("MEMORIA_GRAPHIFY_BIN", valor[0])
-    resolvido = shutil.which(primeiro) or (primeiro if Path(primeiro).is_file() else None)
+    resolvido = (
+        shutil.which(primeiro)
+        or (primeiro if Path(primeiro).is_file() else None)
+        or _executavel_uv(primeiro)
+    )
     if not resolvido:
         raise GrafoErro(
             "Graphify não encontrado. Instale `graphifyy` num Python compatível e rode novamente."
@@ -70,7 +106,7 @@ def _arquivos() -> dict[str, str]:
             continue
         if arquivo.suffix.lower() not in EXTENSOES:
             continue
-        saida[barras(str(rel))] = hashlib.sha256(arquivo.read_bytes()).hexdigest()
+        saida[barras(str(rel))] = sha256_canonico(arquivo.read_bytes())
     return dict(sorted(saida.items()))
 
 
@@ -111,8 +147,12 @@ def _validar_conteudo_grafo(conteudo: object, arquivos: dict[str, str],
     if not isinstance(conteudo, dict) or not isinstance(conteudo.get("nodes"), list):
         raise GrafoErro("`graph.json` não contém a lista de nós esperada")
     nos = len(conteudo["nodes"])
-    if arquivos and nos == 0:
-        raise GrafoErro("Graphify produziu grafo vazio para um projeto com código")
+    extensoes_literais = _extensoes_literais()
+    exigidas_estruturais = {
+        fonte for fonte in arquivos if Path(fonte).suffix.lower() not in extensoes_literais
+    }
+    if exigidas_estruturais and nos == 0:
+        raise GrafoErro("Graphify produziu grafo vazio para um projeto com código estrutural")
 
     fontes = _fontes_do_grafo(conteudo)
     fontes_normalizadas = {f.casefold() for f in fontes}
@@ -121,12 +161,28 @@ def _validar_conteudo_grafo(conteudo: object, arquivos: dict[str, str],
         if fonte.casefold() in fontes_normalizadas
         or any(f.endswith("/" + fonte.casefold()) for f in fontes_normalizadas)
     }
-    cobertura = len(representadas) / len(arquivos) if arquivos else 1.0
+    representadas_estruturais = representadas & exigidas_estruturais
+    # Extensões que o Graphify não analisa continuam integralmente pesquisáveis pelo
+    # gateway local. O marcador as declara, em vez de fingir que possuem AST.
+    literais = {
+        fonte for fonte in arquivos
+        if Path(fonte).suffix.lower() in extensoes_literais and fonte not in representadas
+    }
+    cobertas = representadas | literais
+    sem_cobertura = set(arquivos) - cobertas
+    cobertura_estrutural = (
+        len(representadas_estruturais) / len(exigidas_estruturais)
+        if exigidas_estruturais else 1.0
+    )
+    cobertura_total = len(cobertas) / len(arquivos) if arquivos else 1.0
     minima = float(_cfg().get("cobertura_minima", 0.8))
-    if arquivos and cobertura < minima:
+    if arquivos and (cobertura_estrutural < minima or cobertura_total < minima):
         raise GrafoErro(
-            f"Graphify representou {len(representadas)}/{len(arquivos)} fontes "
-            f"({cobertura:.1%}); mínimo configurado: {minima:.1%}"
+            f"Graphify representou estruturalmente "
+            f"{len(representadas_estruturais)}/{len(exigidas_estruturais)} fontes "
+            f"({cobertura_estrutural:.1%}) e a cobertura total foi "
+            f"{len(cobertas)}/{len(arquivos)} ({cobertura_total:.1%}); "
+            f"mínimo configurado: {minima:.1%}"
         )
 
     reducao_maxima = float(_cfg().get("reducao_maxima_percentual", 50.0))
@@ -148,7 +204,12 @@ def _validar_conteudo_grafo(conteudo: object, arquivos: dict[str, str],
     return {
         "nos": nos,
         "fontes_representadas": sorted(representadas),
-        "cobertura": cobertura,
+        "fontes_literais": sorted(literais),
+        "fontes_sem_cobertura": sorted(sem_cobertura),
+        "cobertura_estrutural": cobertura_estrutural,
+        "cobertura_total": cobertura_total,
+        # Compatibilidade de leitura com consumidores do marcador schema 2.
+        "cobertura": cobertura_total,
     }
 
 
@@ -222,7 +283,7 @@ def sincronizar() -> dict:
         if existente else [*comando_registrado, "extract", ".", "--code-only"],
         "versao": versao or "desconhecida",
         "arquivos": arquivos,
-        "grafo_sha256": hashlib.sha256(grafo_path.read_bytes()).hexdigest(),
+        "grafo_sha256": sha256_canonico(grafo_path.read_bytes()),
         **metricas,
         "assinatura": hashlib.sha256(
             "\n".join(f"{p}:{h}" for p, h in arquivos.items()).encode("utf-8")
@@ -259,11 +320,17 @@ def verificar(silencioso: bool = False, exigir_comando: bool = False) -> int:
             raise ValueError("lista de arquivos do marcador não é um objeto")
         conteudo_grafo = json.loads(arquivo_grafo.read_text(encoding="utf-8"))
         metricas = _validar_conteudo_grafo(conteudo_grafo, anterior)
-        digest = hashlib.sha256(arquivo_grafo.read_bytes()).hexdigest()
+        digest = sha256_canonico(arquivo_grafo.read_bytes())
         if estado.get("grafo_sha256") != digest:
             raise ValueError("hash do graph.json diverge do marcador")
         if estado.get("nos") != metricas["nos"]:
             raise ValueError("contagem de nós diverge do marcador")
+        for chave in (
+            "fontes_representadas", "fontes_literais", "fontes_sem_cobertura",
+            "cobertura_estrutural", "cobertura_total", "cobertura",
+        ):
+            if estado.get(chave) != metricas[chave]:
+                raise ValueError(f"métrica `{chave}` diverge do marcador")
         if exigir_comando:
             comando = _comando()
             atual_versao = _versao_comando(comando)
@@ -283,6 +350,11 @@ def verificar(silencioso: bool = False, exigir_comando: bool = False) -> int:
     if not silencioso:
         titulo("Graphify — grafo de código local")
         print(f"  fontes atuais: {len(atual)} · fontes no marcador: {len(anterior)}")
+        print(
+            f"  cobertura estrutural: {metricas['cobertura_estrutural']:.1%} · "
+            f"literal declarada: {len(metricas['fontes_literais'])} · "
+            f"total: {metricas['cobertura_total']:.1%}"
+        )
     if not mudou and not novo and not sumiu:
         if not silencioso:
             print("\nO grafo está em dia com o código.")

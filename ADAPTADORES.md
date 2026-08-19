@@ -29,12 +29,13 @@ Hermes descobrem a mesma porta pelo comando `memoria contexto`; isso evita modif
 automaticamente arquivos globais do usuário. Todos chegam a `contexto.construir()` e ao
 mesmo envelope v2 com escopo e cobertura explícitos.
 
-## Canary obrigatório
+## Ciclo obrigatório
 
-Cada cliente roda, antes da primeira consulta substancial:
+Cada cliente roda, antes da primeira consulta substancial, o ciclo que prepara os
+provedores e auto-repara estado velho antes de repetir o canary:
 
 ```bash
-memoria adaptadores canary \
+memoria ciclo iniciar \
   --plataforma=codex \
   --perfil=engenharia-leitura \
   --json
@@ -49,8 +50,10 @@ Troque somente o identificador da plataforma. O canary falha se não confirmar:
 - ao menos uma fonte documental atual;
 - commit Git atual; projeto ainda sem commit não passa no canary.
 
-`worktree_sujo` é evidência, não reprovação: uma sessão pode estar trabalhando em uma
-mudança local legítima. O campo `acoes_permitidas` permanece vazio.
+Depois de mudar código ou documentação, o bloco gerenciado manda executar
+`memoria ciclo atualizar` com a mesma plataforma e perfil. `worktree_sujo` é evidência,
+não reprovação: uma sessão pode estar trabalhando em uma mudança local legítima. O campo
+`acoes_permitidas` permanece vazio.
 
 ## Perfis sem escolha ambígua
 

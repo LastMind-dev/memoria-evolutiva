@@ -5,7 +5,7 @@
   "type": "object",
   "additionalProperties": false,
   "required": [
-    "schema", "projeto", "corpus_sha256", "perfil_rag", "metricas", "drift",
+    "schema", "projeto", "corpus_sha256", "perfil_rag", "metricas", "prontidao", "drift",
     "gate", "promocoes_candidatas", "relatorio_sha256", "assinatura"
   ],
   "properties": {
@@ -14,6 +14,7 @@
     "corpus_sha256": { "$ref": "#/$defs/sha256" },
     "perfil_rag": { "$ref": "#/$defs/perfil_rag" },
     "metricas": { "$ref": "#/$defs/metricas" },
+    "prontidao": { "$ref": "#/$defs/prontidao" },
     "drift": { "$ref": "#/$defs/drift" },
     "gate": { "$ref": "#/$defs/gate" },
     "promocoes_candidatas": {
@@ -97,6 +98,33 @@
         "global": { "$ref": "#/$defs/grupo_metricas" },
         "por_perfil": { "$ref": "#/$defs/por_perfil" },
         "por_categoria": { "$ref": "#/$defs/por_categoria" }
+      }
+    },
+    "estado_prontidao": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["pronta", "motivo", "casos_positivos", "casos_negativos", "casos_reprovados"],
+      "properties": {
+        "pronta": { "type": "boolean" },
+        "motivo": {
+          "enum": [
+            "sem_corpus_positivo_autorizado", "casos_reprovados",
+            "casos_positivos_autorizados_aprovados"
+          ]
+        },
+        "casos_positivos": { "type": "integer", "minimum": 0 },
+        "casos_negativos": { "type": "integer", "minimum": 0 },
+        "casos_reprovados": { "$ref": "#/$defs/textos" }
+      }
+    },
+    "prontidao": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["engenharia", "atendimento", "automacao"],
+      "properties": {
+        "engenharia": { "$ref": "#/$defs/estado_prontidao" },
+        "atendimento": { "$ref": "#/$defs/estado_prontidao" },
+        "automacao": { "$ref": "#/$defs/estado_prontidao" }
       }
     },
     "promocao": {

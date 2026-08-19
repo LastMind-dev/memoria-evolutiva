@@ -14,7 +14,7 @@ AJUDA = """memoria — memória evolutiva do projeto
 
 Uso: memoria <comando> [opções]
 
-  instalar   --projeto=NOME --codigo=PASTA [--adiar-bancos|--sem-bancos]
+  instalar   --projeto=NOME --codigo=PASTA [--adiar-bancos|--sem-bancos] [--sem-agendamento]
   diagnosticar [--json]  inventário factual; não escreve no projeto
   analisar    [--json]  consolida evidências e lacunas; não escreve no projeto
   propor-documentacao   legado: cria rascunhos opcionais, sem sobrescrever
@@ -26,6 +26,8 @@ Uso: memoria <comando> [opções]
   fragmentos [gerar|verificar|status]  manifesto determinístico do RAG em modo sombra
   contexto   --pergunta=TEXTO --perfil=PERFIL --json | mcp | http
   adaptadores [gerar|verificar|status|canary]  entradas de Codex, Claude, Cursor, Windsurf e Hermes
+  ciclo      iniciar|atualizar --plataforma=ID --perfil=PERFIL --json  manutenção zero-touch
+  agendador  instalar|status|executar|remover --json  atualização diária sem banco de negócio
   executar   --run-id=ID --acao=documentar|verificar --json  executor isolado e retomável
   avaliar    [medir|gerar|verificar|status] [--json]  métricas e catraca do RAG
   indice     compatibilidade: verifica a cópia documental no Hindsight
@@ -102,6 +104,12 @@ def main() -> int:
     if cmd == "adaptadores":
         from . import adaptadores
         return adaptadores.main(resto)
+    if cmd == "ciclo":
+        from . import ciclo
+        return ciclo.main(resto)
+    if cmd == "agendador":
+        from . import agendador
+        return agendador.main(resto)
     if cmd == "executar":
         from . import executor
         return executor.main(resto)

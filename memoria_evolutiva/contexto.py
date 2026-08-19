@@ -8,16 +8,33 @@ import math
 import re
 import subprocess
 import sys
+import time
 import unicodedata
 from functools import lru_cache
 from pathlib import Path
+from threading import Lock
 
 from . import __version__, fragmentos, grafo, hindsight, indice, seguranca
-from .lib import barras, config, raiz
+from .lib import barras, config, raiz, sha256_canonico
 
 
 SCHEMA = 2
 MCP_PROTOCOL = "2026-07-28"
+STOPWORDS_BUSCA = {
+    "a", "as", "ao", "aos", "como", "da", "das", "de", "do", "dos", "e",
+    "em", "esta", "estao", "foi", "na", "nas", "no", "nos", "o", "os", "onde",
+    "para", "por", "qual", "que", "the", "to", "where", "with",
+}
+# Stems multilíngues usados somente para relacionar a intenção da pergunta ao nome
+# de arquivo. Não alteram o texto devolvido nem criam fatos; apenas resolvem variações
+# previsíveis como `excluído` -> `deletar` e `pesquisa` -> `search`.
+CONCEITOS_CAMINHO = (
+    ({"busc", "pesquis", "consult", "search", "find", "lookup"}, 2.0),
+    ({"salv", "grav", "persist", "inser", "store", "save"}, 2.0),
+    ({"exclu", "delet", "remov", "apag", "delete", "remove"}, 2.0),
+    ({"process", "proccess", "agreg", "aggregate"}, 2.0),
+    ({"autent", "login", "signin"}, 1.5),
+)
 PERFIS = {
     "engenharia-leitura": {
         "classificacoes": {"publico", "interno", "restrito"},
@@ -47,6 +64,9 @@ PERFIS = {
     },
 }
 
+_GRAFO_VERIFICACAO_LOCK = Lock()
+_GRAFO_VERIFICACOES: dict[str, tuple[int, int]] = {}
+
 
 class ContextoErro(RuntimeError):
     pass
@@ -68,28 +88,78 @@ def _inteiro(nome: str, padrao: int, minimo: int, maximo: int) -> int:
     return valor
 
 
-def _normalizar(texto: str) -> str:
+def _normalizar_bruto(texto: str) -> str:
     decomposto = unicodedata.normalize("NFKD", texto.casefold())
     sem_acentos = "".join(c for c in decomposto if not unicodedata.combining(c))
     return re.sub(r"[^a-z0-9_./-]+", " ", sem_acentos).strip()
+
+
+@lru_cache(maxsize=32768)
+def _normalizar_estatico(texto: str) -> str:
+    return _normalizar_bruto(texto)
+
+
+def _normalizar(texto: str) -> str:
+    # Perguntas passam sempre por aqui e nunca ficam retidas em cache.
+    return _normalizar_bruto(texto)
+
+
+def _normalizar_fonte(texto: str) -> str:
+    # Somente fonte estática repetida entre perguntas entra no cache. Linhas longas
+    # ficam fora para limitar memória mesmo diante de arquivos minificados.
+    return _normalizar_estatico(texto) if len(texto) <= 1024 else _normalizar_bruto(texto)
 
 
 def _tokens(texto: str) -> list[str]:
     return [t for t in _normalizar(texto).split() if len(t) > 1]
 
 
-def _pontuacao(pergunta: str, texto: str) -> float:
+def _preparar_pergunta(pergunta: str) -> tuple[str, frozenset[str]]:
     consulta = _tokens(pergunta)
     if not consulta:
+        return _normalizar(pergunta), frozenset()
+    relevantes = [token for token in consulta if token not in STOPWORDS_BUSCA]
+    consulta = relevantes or consulta
+    return _normalizar(pergunta), frozenset(consulta)
+
+
+def _pontuacao_preparada(
+    preparada: tuple[str, frozenset[str]], texto: str,
+) -> float:
+    pergunta_normalizada, unicos = preparada
+    if not unicos:
         return 0.0
-    unicos = set(consulta)
-    normalizado = _normalizar(texto)
+    normalizado = _normalizar_fonte(texto)
     presentes = sum(1 for token in unicos if token in normalizado)
     # A consulta também pode vir de um chunk semântico inteiro. Sem normalização, cada
     # termo adicional aumenta o score e um documento longo domina uma pergunta curta.
     frequencia = sum(min(normalizado.count(token), 3) for token in unicos) / len(unicos)
-    frase = 6.0 if _normalizar(pergunta) in normalizado else 0.0
+    frase = 6.0 if pergunta_normalizada in normalizado else 0.0
     return frase + 4.0 * presentes / len(unicos) + 0.25 * frequencia
+
+
+def _pontuacao(pergunta: str, texto: str) -> float:
+    return _pontuacao_preparada(_preparar_pergunta(pergunta), texto)
+
+
+def _pontuacao_caminho(
+    pergunta: str, caminho: str,
+    preparada: tuple[str, frozenset[str]] | None = None,
+) -> float:
+    consulta = (preparada or _preparar_pergunta(pergunta))[1]
+    normalizado = _normalizar_fonte(caminho)
+    total = 0.0
+    for token in consulta:
+        variantes = {token}
+        peso = 1.0
+        for grupo, peso_grupo in CONCEITOS_CAMINHO:
+            if any(token.startswith(stem) for stem in grupo):
+                variantes = grupo
+                peso = peso_grupo
+                break
+        if any(variante in normalizado for variante in variantes):
+            total += 2.0 * peso
+    return total
 
 
 def _permitido(fragmento: dict, perfil: str,
@@ -143,7 +213,11 @@ def _sinais_semanticos(
     if indice.verificar(silencioso=True) != 0:
         return {}, ["Hindsight defasado; resultados semânticos foram ignorados."], False
     try:
-        hindsight.verificar_ao_vivo()
+        # O marcador foi produzido somente depois da confirmação integral do banco.
+        # No caminho de consulta, o recall confirma a disponibilidade do provedor e as
+        # fontes locais atuais continuam sendo a autoridade. Revalidar cada documento
+        # remotamente a cada pergunta multiplicava a latência sem aumentar a confiança
+        # do envelope devolvido. A auditoria integral permanece em `bancos status`.
         resposta = hindsight.consultar(pergunta, max_tokens=min(max_tokens, 4096))
     except hindsight.HindsightErro as exc:
         return {}, [f"Hindsight indisponível; resultados semânticos ignorados: {exc}"], False
@@ -208,10 +282,14 @@ def _descricao_no(no: dict) -> str:
     return " ".join(partes)[:4000]
 
 
-def _melhor_linha(linhas: list[str], pergunta: str) -> tuple[int, float]:
+def _melhor_linha(
+    linhas: list[str] | tuple[str, ...], pergunta: str,
+    preparada: tuple[str, frozenset[str]] | None = None,
+) -> tuple[int, float]:
+    consulta = preparada or _preparar_pergunta(pergunta)
     melhor = (1, 0.0)
     for numero, linha in enumerate(linhas, 1):
-        score = _pontuacao(pergunta, linha)
+        score = _pontuacao_preparada(consulta, linha)
         if score > melhor[1]:
             melhor = (numero, score)
     return melhor
@@ -225,12 +303,50 @@ def _trecho_codigo(linhas: list[str], linha: int) -> str:
     )
 
 
+def _verificar_grafo_compartilhado() -> int:
+    """Compartilha somente trabalho simultâneo; chamada posterior verifica de novo."""
+    inicio = time.monotonic_ns()
+    chave = str(Path(raiz()).resolve())
+    with _GRAFO_VERIFICACAO_LOCK:
+        anterior = _GRAFO_VERIFICACOES.get(chave)
+        if anterior is not None and anterior[0] >= inicio:
+            return anterior[1]
+        resultado = grafo.verificar(silencioso=True, exigir_comando=False)
+        _GRAFO_VERIFICACOES[chave] = (time.monotonic_ns(), resultado)
+        return resultado
+
+
+@lru_cache(maxsize=8)
+def _codigo_confirmado(
+    base_str: str, marcador_sha256: str,
+) -> tuple[dict[str, str], tuple[dict, ...], dict[str, tuple[tuple[str, ...], str]]]:
+    """Carrega uma fotografia imutável depois que `grafo.verificar` confirmou hashes."""
+    del marcador_sha256  # participa da chave e invalida a fotografia a cada marcador novo
+    marcador = json.loads(grafo._marcador().read_text(encoding="utf-8"))
+    arquivos = marcador.get("arquivos", {})
+    conteudo_grafo = json.loads(grafo._grafo().read_text(encoding="utf-8"))
+    if not isinstance(arquivos, dict) or not isinstance(conteudo_grafo.get("nodes"), list):
+        raise ValueError("Graphify não possui marcador/nós no formato esperado")
+    base = Path(base_str).resolve()
+    fontes: dict[str, tuple[tuple[str, ...], str]] = {}
+    for rel, digest in sorted(arquivos.items()):
+        caminho = (base / rel).resolve()
+        if not caminho.is_relative_to(base) or not caminho.is_file():
+            raise ValueError(f"fonte confirmada desapareceu antes da leitura: `{rel}`")
+        bruto = caminho.read_bytes()
+        atual = sha256_canonico(bruto)
+        if atual != digest:
+            raise ValueError(f"fonte mudou durante a leitura confirmada: `{rel}`")
+        fontes[rel] = (tuple(bruto.decode("utf-8", errors="replace").splitlines()), atual)
+    return dict(arquivos), tuple(conteudo_grafo["nodes"]), fontes
+
+
 def _candidatos_codigo(pergunta: str, permitir: bool) -> tuple[list[dict], list[str], bool]:
     if not permitir:
         return [], [], True
     cfg_grafo = config().get("grafo", {})
     ativo = bool(cfg_grafo.get("ativo"))
-    grafo_fresco = ativo and grafo.verificar(silencioso=True, exigir_comando=False) == 0
+    grafo_fresco = ativo and _verificar_grafo_compartilhado() == 0
     avisos: list[str] = []
     if ativo and not grafo_fresco:
         avisos.append("Graphify defasado; sinais estruturais foram ignorados.")
@@ -239,13 +355,14 @@ def _candidatos_codigo(pergunta: str, permitir: bool) -> tuple[list[dict], list[
 
     if grafo_fresco:
         try:
-            marcador = json.loads(grafo._marcador().read_text(encoding="utf-8"))
-            arquivos = marcador.get("arquivos", {})
-            conteudo_grafo = json.loads(grafo._grafo().read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError, AttributeError, TypeError, grafo.GrafoErro) as exc:
+            marcador_bruto = grafo._marcador().read_bytes()
+            arquivos, nos, fontes_confirmadas = _codigo_confirmado(
+                str(Path(raiz()).resolve()), sha256_canonico(marcador_bruto)
+            )
+            conteudo_grafo = {"nodes": nos}
+        except (OSError, ValueError, json.JSONDecodeError, AttributeError,
+                TypeError, grafo.GrafoErro) as exc:
             return [], [f"Graphify inválido; sinais estruturais ignorados: {exc}"], False
-        if not isinstance(arquivos, dict) or not isinstance(conteudo_grafo.get("nodes"), list):
-            return [], ["Graphify não possui marcador/nós no formato esperado."], False
     else:
         try:
             arquivos = grafo._arquivos()
@@ -254,24 +371,25 @@ def _candidatos_codigo(pergunta: str, permitir: bool) -> tuple[list[dict], list[
         conteudo_grafo = {"nodes": []}
 
     base = Path(raiz())
-    fontes: dict[str, tuple[list[str], str]] = {}
-    for rel, digest in sorted(arquivos.items()):
-        caminho = (base / rel).resolve()
-        if not caminho.is_relative_to(base.resolve()) or not caminho.is_file():
-            continue
-        try:
-            bruto = caminho.read_bytes()
-            texto = bruto.decode("utf-8", errors="replace")
-        except OSError:
-            continue
-        atual = hashlib.sha256(bruto).hexdigest()
-        if grafo_fresco and atual != digest:
-            continue
-        fontes[rel] = (texto.splitlines(), atual)
+    pergunta_preparada = _preparar_pergunta(pergunta)
+    fontes: dict[str, tuple[tuple[str, ...] | list[str], str]] = {}
+    if grafo_fresco:
+        fontes.update(fontes_confirmadas)
+    else:
+        for rel, digest in sorted(arquivos.items()):
+            caminho = (base / rel).resolve()
+            if not caminho.is_relative_to(base.resolve()) or not caminho.is_file():
+                continue
+            try:
+                bruto = caminho.read_bytes()
+                texto = bruto.decode("utf-8", errors="replace")
+            except OSError:
+                continue
+            fontes[rel] = (texto.splitlines(), sha256_canonico(bruto))
 
     candidatos: dict[tuple[str, int], dict] = {}
     for rel, (linhas, digest) in fontes.items():
-        linha, score = _melhor_linha(linhas, pergunta)
+        linha, score = _melhor_linha(linhas, pergunta, pergunta_preparada)
         if score <= 0:
             continue
         candidatos[(rel, linha)] = {
@@ -280,7 +398,9 @@ def _candidatos_codigo(pergunta: str, permitir: bool) -> tuple[list[dict], list[
             "no_id": None,
             "trecho": _trecho_codigo(linhas, linha),
             "estrategias": ["literal-codigo"],
-            "_score": score,
+            "_score": score + _pontuacao_caminho(
+                pergunta, rel, pergunta_preparada
+            ),
         }
 
     for no in conteudo_grafo.get("nodes", []):
@@ -289,19 +409,29 @@ def _candidatos_codigo(pergunta: str, permitir: bool) -> tuple[list[dict], list[
         rel = _relativo_codigo(no.get("source_file"), arquivos)
         if not rel or rel not in fontes:
             continue
-        estrutural = _pontuacao(pergunta, _descricao_no(no))
+        estrutural = _pontuacao_preparada(pergunta_preparada, _descricao_no(no))
         if estrutural <= 0:
             continue
         linhas, digest = fontes[rel]
-        linha = _linha_no(no) or _melhor_linha(linhas, pergunta)[0]
+        linha = _linha_no(no) or _melhor_linha(
+            linhas, pergunta, pergunta_preparada
+        )[0]
         linha = max(1, min(linha, max(1, len(linhas))))
         chave = (rel, linha)
+        bonus_caminho = _pontuacao_caminho(pergunta, rel, pergunta_preparada)
         existente = candidatos.get(chave)
         if existente:
-            existente["_score"] += estrutural + 2.0
+            contribuicao = estrutural + 2.0
+            anterior = float(existente.get("_score_estrutural", 0.0))
+            # Vários nós Graphify podem apontar para a mesma linha. Somá-los fazia a
+            # duplicidade estrutural vencer termos exatos em outro arquivo; uma linha
+            # recebe apenas a melhor evidência estrutural encontrada.
+            if contribuicao > anterior:
+                existente["_score"] += contribuicao - anterior
+                existente["_score_estrutural"] = contribuicao
+                if no.get("id") is not None:
+                    existente["no_id"] = str(no["id"])
             existente["estrategias"] = sorted(set(existente["estrategias"] + ["estrutural"]))
-            if existente["no_id"] is None and no.get("id") is not None:
-                existente["no_id"] = str(no["id"])
             continue
         candidatos[chave] = {
             "source_uri": f"{rel}#L{linha}",
@@ -309,7 +439,8 @@ def _candidatos_codigo(pergunta: str, permitir: bool) -> tuple[list[dict], list[
             "no_id": str(no.get("id")) if no.get("id") is not None else None,
             "trecho": _trecho_codigo(linhas, linha),
             "estrategias": ["estrutural"],
-            "_score": estrutural + 2.0,
+            "_score": estrutural + 2.0 + bonus_caminho,
+            "_score_estrutural": estrutural + 2.0,
         }
     return list(candidatos.values()), avisos, not ativo or grafo_fresco
 
@@ -326,7 +457,7 @@ def _commit_da_fonte(base: str, rel: str, source_sha256: str,
         )
         if conteudo.returncode != 0:
             return None
-        if hashlib.sha256(conteudo.stdout).hexdigest() != source_sha256:
+        if sha256_canonico(conteudo.stdout) != source_sha256:
             return None
         return head
     except (OSError, subprocess.TimeoutExpired):
@@ -356,7 +487,7 @@ def _confirmar_fragmento(fragmento: dict, head: str | None) -> dict:
         texto = bruto.decode("utf-8").replace("\r\n", "\n").replace("\r", "\n")
     except (OSError, UnicodeDecodeError) as exc:
         raise ContextoErro(f"não foi possível reler `{source_uri}`: {exc}") from exc
-    digest = hashlib.sha256(bruto).hexdigest()
+    digest = sha256_canonico(bruto)
     if digest != fragmento.get("source_sha256"):
         raise ContextoErro(f"hash da fonte divergiu para `{source_uri}`")
     corpo = fragmentos._sem_frontmatter(texto)
