@@ -30,6 +30,11 @@ class AgendadorErro(RuntimeError):
     pass
 
 
+def _windows() -> bool:
+    """Ponto de decisão isolado para permitir testes cruzados sem alterar ``os`` global."""
+    return os.name == "nt"
+
+
 def _cfg() -> dict:
     valor = config().get("agendamento", {})
     esperados = {
@@ -133,13 +138,13 @@ raise SystemExit(codigo)
 
 
 def _escrever_script() -> Path:
-    destino, texto = _script_windows() if os.name == "nt" else _script_posix()
+    destino, texto = _script_windows() if _windows() else _script_posix()
     destino.parent.mkdir(parents=True, exist_ok=True)
     for arquivo, conteudo in ((destino, texto), _runner()):
         temporario = arquivo.with_suffix(arquivo.suffix + ".tmp")
         temporario.write_text(conteudo, encoding="utf-8", newline="\n")
         os.replace(temporario, arquivo)
-    if os.name != "nt":
+    if not _windows():
         destino.chmod(0o700)
     return destino
 
@@ -167,7 +172,7 @@ def _linha_cron(script: Path) -> str:
 
 
 def _status_sistema() -> bool:
-    if os.name == "nt":
+    if _windows():
         resultado = _subprocess([
             "schtasks.exe", "/Query", "/TN", _nome_tarefa(), "/XML",
         ])
@@ -201,7 +206,7 @@ def _status_sistema() -> bool:
 
 def _registrar(script: Path) -> None:
     horario = str(_cfg()["horario_local"])
-    if os.name == "nt":
+    if _windows():
         comando, argumentos = _acao_windows(script)
         tarefa = f"{comando} {argumentos}"
         resultado = _subprocess([
@@ -227,7 +232,7 @@ def _registrar(script: Path) -> None:
 
 
 def _remover() -> None:
-    if os.name == "nt":
+    if _windows():
         resultado = _subprocess(["schtasks.exe", "/Delete", "/F", "/TN", _nome_tarefa()])
         if resultado.returncode != 0:
             existe = _subprocess([
@@ -284,7 +289,7 @@ def operar(acao: str) -> tuple[int, dict]:
         return executar()
     base = {
         "schema": SCHEMA, "ok": False, "acao": acao,
-        "agendador": "windows-task-scheduler" if os.name == "nt" else "crontab-usuario",
+        "agendador": "windows-task-scheduler" if _windows() else "crontab-usuario",
         "identidade": _identidade(), "banco_negocio": "nao_acessado",
         "publicado": False, "commit_criado": False, "erro": None,
     }

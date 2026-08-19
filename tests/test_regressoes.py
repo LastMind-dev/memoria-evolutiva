@@ -2518,7 +2518,7 @@ class CicloAutonomoTest(unittest.TestCase):
         ]
         with (
             mock.patch.object(agendador, "_cfg", return_value=cfg),
-            mock.patch.object(agendador.os, "name", "nt"),
+            mock.patch.object(agendador, "_windows", return_value=True),
             mock.patch.object(agendador, "_nome_tarefa", return_value="MemoriaEvolutiva-teste-123"),
             mock.patch.object(agendador, "_estado", return_value=script.parent),
             mock.patch.object(agendador, "_subprocess", side_effect=respostas) as rodar,
@@ -2547,7 +2547,7 @@ class CicloAutonomoTest(unittest.TestCase):
         )
         with (
             mock.patch.object(agendador, "_cfg", return_value={"horario_local": "02:15"}),
-            mock.patch.object(agendador.os, "name", "nt"),
+            mock.patch.object(agendador, "_windows", return_value=True),
             mock.patch.object(
                 agendador, "_subprocess",
                 return_value=subprocess.CompletedProcess([], 0, xml, ""),
@@ -2561,7 +2561,7 @@ class CicloAutonomoTest(unittest.TestCase):
             subprocess.CompletedProcess([], 0, "tarefa existe", ""),
         ]
         with (
-            mock.patch.object(agendador.os, "name", "nt"),
+            mock.patch.object(agendador, "_windows", return_value=True),
             mock.patch.object(agendador, "_subprocess", side_effect=respostas),
         ):
             with self.assertRaisesRegex(agendador.AgendadorErro, "recusou a remoção"):
@@ -2575,7 +2575,7 @@ class CicloAutonomoTest(unittest.TestCase):
         ]
         with (
             mock.patch.object(agendador, "_cfg", return_value=cfg),
-            mock.patch.object(agendador.os, "name", "posix"),
+            mock.patch.object(agendador, "_windows", return_value=False),
             mock.patch.object(agendador, "_marcador_cron", return_value="# memoria-evolutiva:abc"),
             mock.patch.object(agendador, "_subprocess", side_effect=respostas) as rodar,
         ):

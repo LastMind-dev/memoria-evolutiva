@@ -293,7 +293,7 @@ def executar(substituir_iniciais: set[str] | None = None,
         if atual and not gerenciado and relativo not in substituir_iniciais:
             digest = hashlib.sha256(atual).hexdigest()[:12]
             nome_seguro = relativo.replace("/", "__")
-            arquivo = Path(raiz()) / ".memoria/legado-documentacao" / (
+            arquivo = base_raiz / ".memoria/legado-documentacao" / (
                 f"{digest}__{nome_seguro}"
             )
             arquivo.parent.mkdir(parents=True, exist_ok=True)

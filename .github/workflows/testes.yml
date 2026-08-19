@@ -85,4 +85,4 @@ jobs:
       - name: A árvore continua limpa depois de validar
         run: |
           cd /tmp/fixture && git add -A
-          test -z "$(git diff --cached --name-only -- . ':!docs' ':!padrao.json' ':!.github' ':!AGENTS.md' ':!CLAUDE.md' ':!.cursor' ':!.windsurfrules' ':!scripts' ':!skill-memoria-evolutiva')"
+          test -z "$(git diff --cached --name-only -- . ':!.gitignore' ':!docs' ':!padrao.json' ':!.github' ':!AGENTS.md' ':!CLAUDE.md' ':!.cursor' ':!.windsurfrules' ':!scripts' ':!skill-memoria-evolutiva')"

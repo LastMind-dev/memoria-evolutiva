@@ -146,7 +146,19 @@ def markdowns(dir_: str) -> list[str]:
 
 
 def relativo(absoluto: str) -> str:
-    return barras(absoluto).replace(raiz() + "/", "", 1)
+    """Converte caminho do projeto sem depender da grafia usada pelo Windows.
+
+    O mesmo diretório pode chegar como ``RUNNER~1`` e ``runneradmin``. Comparar as
+    strings deixa o caminho absoluto vazar para artefatos derivados e os torna
+    diferentes depois de um clone. ``resolve`` canoniza os dois lados antes de
+    calcular a relação; caminhos externos continuam sendo apenas normalizados.
+    """
+    caminho = Path(absoluto)
+    base = Path(raiz())
+    try:
+        return barras(str(caminho.resolve().relative_to(base.resolve())))
+    except (OSError, ValueError):
+        return barras(absoluto)
 
 
 def comeca_com(caminho: str, prefixos: list[str]) -> bool:

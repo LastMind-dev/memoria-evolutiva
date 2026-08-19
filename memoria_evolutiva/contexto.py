@@ -8,8 +8,8 @@ import math
 import re
 import subprocess
 import sys
-import time
 import unicodedata
+from concurrent.futures import Future
 from functools import lru_cache
 from pathlib import Path
 from threading import Lock
@@ -65,7 +65,7 @@ PERFIS = {
 }
 
 _GRAFO_VERIFICACAO_LOCK = Lock()
-_GRAFO_VERIFICACOES: dict[str, tuple[int, int]] = {}
+_GRAFO_VERIFICACOES: dict[str, Future[int]] = {}
 
 
 class ContextoErro(RuntimeError):
@@ -305,15 +305,29 @@ def _trecho_codigo(linhas: list[str], linha: int) -> str:
 
 def _verificar_grafo_compartilhado() -> int:
     """Compartilha somente trabalho simultâneo; chamada posterior verifica de novo."""
-    inicio = time.monotonic_ns()
     chave = str(Path(raiz()).resolve())
     with _GRAFO_VERIFICACAO_LOCK:
-        anterior = _GRAFO_VERIFICACOES.get(chave)
-        if anterior is not None and anterior[0] >= inicio:
-            return anterior[1]
+        futuro = _GRAFO_VERIFICACOES.get(chave)
+        lider = futuro is None
+        if futuro is None:
+            futuro = Future()
+            _GRAFO_VERIFICACOES[chave] = futuro
+
+    if not lider:
+        return futuro.result()
+
+    try:
         resultado = grafo.verificar(silencioso=True, exigir_comando=False)
-        _GRAFO_VERIFICACOES[chave] = (time.monotonic_ns(), resultado)
+    except BaseException as exc:
+        futuro.set_exception(exc)
+        raise
+    else:
+        futuro.set_result(resultado)
         return resultado
+    finally:
+        with _GRAFO_VERIFICACAO_LOCK:
+            if _GRAFO_VERIFICACOES.get(chave) is futuro:
+                del _GRAFO_VERIFICACOES[chave]
 
 
 @lru_cache(maxsize=8)
