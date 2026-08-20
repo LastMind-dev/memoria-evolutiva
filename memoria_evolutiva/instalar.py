@@ -4,8 +4,9 @@ O que faz: publica os stubs (SEM sobrescrever nada), garante a árvore com .gitk
 escreve/ajusta o padrao.json, troca <NOME-DO-PROJETO> pelo nome real, transforma o
 modelo de cronologia no mês corrente.
 
-Em instalação nova, conclui o núcleo factual, gera derivados, mede a catraca, valida e
-sincroniza os provedores locais. Não commita nem publica. É seguro rodar de novo.
+Em instalação nova, conclui o núcleo factual, gera derivados e a skill, mede as
+catracas, sincroniza os provedores, executa o autoteste e confirma a instalação.
+Não commita nem publica. É seguro rodar de novo.
 """
 
 from __future__ import annotations
@@ -38,8 +39,106 @@ EXTENSOES_CODIGO = {
 }
 PULAR_DETECCAO = {
     ".git", ".memoria", ".venv", "build", "dist", "docs", "node_modules",
-    "vendor", "venv", "__pycache__",
+    "vendor", "venv", "__pycache__", "graphify-out", "skill-memoria-evolutiva",
 }
+RAIZES_CONVENCIONAIS = {"src", "app", "lib", "packages", "source"}
+
+PLACEHOLDERS_PROJETO = {"", "meu-projeto", "<NOME-DO-PROJETO>", "nome-do-projeto"}
+
+
+def _nome_projeto(raiz_: str, informado: object | None) -> str:
+    """Resolve a identidade sem obrigar a repetir o nome da pasta na CLI."""
+    if informado is None:
+        arq_config = Path(raiz_) / "padrao.json"
+        if arq_config.is_file():
+            try:
+                existente = json.loads(arq_config.read_text(encoding="utf-8"))
+            except (json.JSONDecodeError, OSError):
+                existente = None
+            if isinstance(existente, dict):
+                configurado = existente.get("projeto")
+                if isinstance(configurado, str) and configurado not in PLACEHOLDERS_PROJETO:
+                    informado = configurado
+        if informado is None:
+            informado = Path(raiz_).resolve().name
+
+    if not isinstance(informado, str) or not informado:
+        raise ValueError(
+            "não foi possível detectar o nome do projeto pela pasta atual; "
+            "use `--projeto=NOME`"
+        )
+    if informado != informado.strip() or any(ch in informado for ch in "\r\n"):
+        raise ValueError(
+            "o nome do projeto não pode começar/terminar com espaço nem conter quebra de linha"
+        )
+    return informado
+
+
+def _fontes_de_codigo(raiz_: str) -> list[Path]:
+    base = Path(raiz_).resolve()
+    fontes: list[Path] = []
+    for arquivo in base.rglob("*"):
+        if not arquivo.is_file() or arquivo.is_symlink():
+            continue
+        relativo = arquivo.relative_to(base)
+        if any(parte in PULAR_DETECCAO for parte in relativo.parts):
+            continue
+        if arquivo.suffix.lower() in EXTENSOES_CODIGO:
+            fontes.append(relativo)
+    return fontes
+
+
+def _detectar_raiz_codigo(raiz_: str) -> str:
+    """Escolhe a menor raiz convencional que ainda cubra todo o código observado."""
+    fontes = _fontes_de_codigo(raiz_)
+    if not fontes:
+        return "src" if (Path(raiz_) / "src").is_dir() else "."
+
+    primeiros = {fonte.parts[0] if len(fonte.parts) > 1 else "." for fonte in fontes}
+    if len(primeiros) == 1:
+        unica = next(iter(primeiros))
+        if unica.lower() in RAIZES_CONVENCIONAIS:
+            return unica
+    return "."
+
+
+def _raiz_codigo(raiz_: str, informada: object | None) -> str:
+    """Preserva configuração existente ou detecta o escopo sem perguntar ao usuário."""
+    if informada is None:
+        arq_config = Path(raiz_) / "padrao.json"
+        if arq_config.is_file():
+            try:
+                existente = json.loads(arq_config.read_text(encoding="utf-8"))
+            except (json.JSONDecodeError, OSError):
+                existente = None
+            if isinstance(existente, dict):
+                gerado = existente.get("gerado")
+                if isinstance(gerado, dict):
+                    configurada = gerado.get("raiz")
+                    if isinstance(configurada, str) and configurada:
+                        informada = configurada
+        if informada is None:
+            informada = _detectar_raiz_codigo(raiz_)
+
+    if not isinstance(informada, str) or not informada:
+        raise ValueError("a raiz do código detectada é inválida")
+    return informada
+
+
+def _fechar_instalacao(*, incluir_bancos: bool, executar_autoteste: bool) -> int:
+    """Gera a peça dos agentes e prova o resultado antes de registrar automação."""
+    from . import autoteste, skill, verificacao
+
+    if skill.main([]) != 0:
+        print("\nA estrutura foi instalada, mas a skill dos agentes não foi gerada.")
+        return 1
+    if verificacao.executar(incluir_bancos=incluir_bancos) != 0:
+        print("\nA estrutura foi instalada, mas a verificação final não aprovou.")
+        return 1
+    if executar_autoteste and autoteste.main() != 0:
+        print("\nA estrutura foi instalada, mas o autoteste encontrou uma catraca ineficaz.")
+        return 1
+    return 0
 
 GITIGNORE_GRAPHIFY = """# memoria-evolutiva: estado local do Graphify
 graphify-out/cache/
@@ -344,46 +443,39 @@ def main(argv: list[str]) -> int:
 
     desconhecidos = sorted(set(args) - {
         "projeto", "codigo", "sem-bancos", "adiar-bancos", "sem-agendamento",
+        "sem-autoteste",
     })
     if desconhecidos or invalidos:
         nomes = [*(f"--{a}" for a in desconhecidos), *invalidos]
         print("Opção desconhecida: " + ", ".join(nomes))
         return 2
 
-    projeto = args.get("projeto")
-    codigo_arg = args.get("codigo", "src")
-    if not isinstance(codigo_arg, str) or not codigo_arg:
-        print("`--codigo` exige uma pasta não vazia.")
+    # A raiz do projeto é o CWD. O nome nasce dessa pasta, salvo identidade já
+    # consolidada em padrao.json ou nome explícito na primeira instalação.
+    raiz_ = barras(os.getcwd())
+    try:
+        projeto = _nome_projeto(raiz_, args.get("projeto"))
+    except ValueError as exc:
+        print(f"Nome do projeto inválido: {exc}.")
         return 2
-    codigo = codigo_arg
+
+    try:
+        codigo = _raiz_codigo(raiz_, args.get("codigo"))
+    except ValueError as exc:
+        print(f"Raiz do código inválida: {exc}.")
+        return 2
     sem_bancos = bool(args.get("sem-bancos"))
     adiar_bancos = bool(args.get("adiar-bancos"))
     sem_agendamento = bool(args.get("sem-agendamento"))
+    sem_autoteste = bool(args.get("sem-autoteste"))
     if sem_bancos and adiar_bancos:
         print("Use apenas um: `--sem-bancos` ou `--adiar-bancos`.")
         return 2
     bancos_ativos = not sem_bancos
 
-    if not isinstance(projeto, str) or not projeto:
-        print("Faltou --projeto.\n")
-        print('  memoria instalar --projeto="meu-app" --codigo=src\n')
-        print("Opções:")
-        print("  --projeto=NOME    obrigatório. Vai no frontmatter de todo documento.")
-        print("  --codigo=PASTA    onde o código vive (padrão: src). O gerador varre daí.")
-        print("  --adiar-bancos     configura Hindsight+Graphify, sem sincronizar nesta execução.")
-        print("  --sem-bancos       opt-out explícito: instala somente documentação canônica.")
-        print("  --sem-agendamento  não registra a execução diária nesta instalação.")
-        return 2
-
-    # A raiz do projeto é o CWD — rode o instalador na raiz. (raiz() da lib procuraria
-    # padrao.json acima, o que num projeto virgem também acaba no cwd.)
-    raiz_ = barras(os.getcwd())
     codigo_abs = (Path(raiz_) / codigo).resolve()
     if not codigo_abs.is_relative_to(Path(raiz_).resolve()):
         print(f"`--codigo={codigo}` sai da raiz do projeto. Escolha uma pasta interna.")
-        return 2
-    if projeto != projeto.strip() or any(ch in projeto for ch in "\r\n"):
-        print("`--projeto` não pode começar/terminar com espaço nem conter quebra de linha.")
         return 2
     criados: list[str] = []
     existiam: list[str] = []
@@ -430,8 +522,7 @@ def main(argv: list[str]) -> int:
             morre(f"`padrao.json` existe mas não é JSON válido: {e.msg}\n"
                   "Conserte ou apague o arquivo e rode de novo.\n")
 
-        placeholders = ["", "meu-projeto", "<NOME-DO-PROJETO>", "nome-do-projeto"]
-        if str(atual.get("projeto", "")) in placeholders:
+        if str(atual.get("projeto", "")) in PLACEHOLDERS_PROJETO:
             atual["projeto"] = projeto
             ajustados.append(f"projeto → {projeto}")
         elif atual.get("projeto") != projeto:
@@ -681,6 +772,15 @@ def main(argv: list[str]) -> int:
         print("\nA estrutura foi instalada, mas a documentação autônoma não validou.")
         return rc_documentar
 
+    # A instalação precisa deixar a peça que os agentes usam pronta, e não apenas
+    # ensinar um segundo comando ao operador. A catraca agregada é a mesma da CLI.
+    rc_fechamento = _fechar_instalacao(
+        incluir_bancos=not adiar_bancos,
+        executar_autoteste=not sem_autoteste,
+    )
+    if rc_fechamento != 0:
+        return rc_fechamento
+
     # O único job registrado chama o comando fechado da biblioteca. Ele atualiza docs,
     # Hindsight e Graphify, mas não recebe conexão nem comando para o banco da aplicação.
     if bancos_ativos and not adiar_bancos and not sem_agendamento:
@@ -721,9 +821,12 @@ def main(argv: list[str]) -> int:
             print(f"  ! {f}")
 
     print("\n" + "─" * 60)
-    print("FLUXO AUTÔNOMO:\n")
-    print("  memoria documentar  ← relê, documenta, gera e valida sem revisão humana")
-    print("  memoria autoteste   ← prova que as catracas ainda detectam falhas")
+    print("INSTALAÇÃO AUTÔNOMA CONCLUÍDA:\n")
+    print("  documentação, RAG, adaptadores, skill e catracas foram confirmados")
+    if sem_autoteste:
+        print("  autoteste não executado por `--sem-autoteste`")
+    else:
+        print("  autoteste aprovado em cópia temporária")
     if bancos_ativos:
         if adiar_bancos:
             print("  memoria bancos sincronizar  ← pendente por `--adiar-bancos`")
@@ -733,6 +836,7 @@ def main(argv: list[str]) -> int:
                 print("  agendamento diário não registrado por `--sem-agendamento`")
             else:
                 print("  atualização diária da memória registrada para 02:15")
-    print("\nA verificação documental não depende de aprovação humana. Fato sem prova fica")
+    print("\nNenhum outro comando de instalação é necessário. A verificação documental")
+    print("não depende de aprovação humana. Fato sem prova fica")
     print("`indeterminado`; publicação e ação externa continuam exigindo autorização própria.")
     return 0

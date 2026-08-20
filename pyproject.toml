@@ -14,6 +14,7 @@ keywords = ["documentation", "adr", "prd", "docs-as-code", "llm", "memoria-evolu
 
 [project.scripts]
 memoria = "memoria_evolutiva.__main__:main"
+memory = "memoria_evolutiva.__main__:main"
 
 [project.optional-dependencies]
 local = [

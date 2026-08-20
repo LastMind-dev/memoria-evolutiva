@@ -20,13 +20,24 @@ sabe onde o projeto está. E se todas as ferramentas de IA sumirem, a memória c
 ```bash
 pipx install --include-deps "memoria-evolutiva[local] @ git+https://github.com/LastMind-dev/memoria-evolutiva.git@main"
 cd meu-projeto
-memoria instalar --projeto="meu-app" --codigo=src
+memory install
 ```
+
+Esse é o único comando por projeto. O nome vem da pasta atual; a raiz do código é
+detectada entre `src`, `app`, `lib`, `packages`, `source` e a própria raiz. Quando há código em
+mais de uma área, o instalador escolhe `.` para garantir cobertura integral. A identidade
+e o escopo já registrados em `padrao.json` são preservados nas reinstalações.
 
 O extra `local` traz Hindsight Embed e Graphify na mesma instalação. O perfil global do
 Hindsight ou as variáveis `HINDSIGHT_API_LLM_*` continuam definindo o modelo sem
 acoplá-lo ao projeto. O instalador inicia o daemon local sob demanda e falha
 objetivamente se algum provedor não confirmar; não pede que uma pessoa julgue o resultado.
+
+Esse é o único comando de implantação da memória no projeto. Quando ele termina com
+código zero, já gerou a documentação, o corpus RAG, os adaptadores e a skill; sincronizou
+e confirmou Hindsight+Graphify; executou a verificação agregada e o autoteste numa cópia
+temporária; e registrou e confirmou a manutenção diária. Não é preciso executar
+`gerar`, `skill`, `verificar`, `autoteste` ou `agendador instalar` depois dele.
 
 O instalador publica a árvore, detecta as linguagens presentes, calcula a cobertura
 integral dos bytes de cada fonte configurada, gera o núcleo estrutural, congela a primeira linha de base, valida e
@@ -48,7 +59,8 @@ evolutivos preservados ou para PRD/FDD/HLD/LLD/ADR; sem prova, usa `indeterminad
 Conteúdo preexistente do núcleo é arquivado em `.memoria/legado-documentacao/` antes de
 o documento gerenciado assumir a jurisdição; demais documentos não são sobrescritos.
 
-Depois de instalar, a manutenção usa dois gatilhos objetivos:
+Depois de instalar, estes comandos ficam disponíveis para uso cotidiano, diagnóstico ou
+reexecução deliberada. Eles **não são continuação da instalação**:
 
 ```bash
 memoria ciclo iniciar --plataforma=codex --perfil=engenharia-leitura --json
@@ -73,7 +85,7 @@ URLs de origem que contenham usuário ou senha não são propagadas para o workf
 
 | Comando | Faz | Falha quando |
 |---|---|---|
-| `memoria instalar` | instala, documenta, valida e cria/sincroniza os dois bancos locais | etapa autônoma ou provedor local não confirma |
+| `memory install` | fecha em um comando docs, RAG, adaptadores, skill, verificações, autoteste, bancos e agendamento | qualquer etapa autônoma ou provedor local não confirma |
 | `memoria documentar` | relê as fontes, atualiza o núcleo, gera, valida e sincroniza os bancos | política, cobertura, estrutura ou banco diverge |
 | `memoria diagnosticar` | inventário factual da estrutura, stack declarada, testes e CI | configuração inválida |
 | `memoria analisar` | consolida evidências observáveis e perguntas ainda sem resposta | configuração inválida |
@@ -184,7 +196,9 @@ em `padrao.json` → `gerado`, e os extratores próprios rodam na linguagem do p
 
 Para uma instalação deliberadamente sem bancos use `--sem-bancos`; para somente gerar a
 estrutura enquanto os serviços locais são preparados, use `--adiar-bancos`. São exceções
-explícitas — o padrão normal exige os dois.
+explícitas — o padrão normal exige os dois. `--sem-agendamento` e `--sem-autoteste`
+também são opt-outs explícitos para ambientes que proíbam tarefas do usuário ou para
+testes repetitivos do próprio pacote; não fazem parte do comando recomendado.
 
 ## Motor legado em PHP
 

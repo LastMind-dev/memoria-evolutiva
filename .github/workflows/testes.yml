@@ -56,24 +56,8 @@ jobs:
           cd /tmp/fixture && git init -b main && git add -A
           git -c user.email=ci@ci -c user.name=ci commit -m fixture
 
-      - name: Instalar o padrão
-        run: cd /tmp/fixture && memoria instalar --projeto="fixture" --codigo=src --sem-bancos
-
-      - name: Gerar derivados e congelar a dívida
-        run: |
-          cd /tmp/fixture
-          memoria gerar
-          memoria catraca --medir
-
-      - name: Bateria completa
-        run: |
-          cd /tmp/fixture
-          memoria skill
-          memoria skill --conferir
-          memoria validar
-          memoria catraca
-          memoria bancos status
-          memoria autoteste
+      - name: Instalar e fechar o padrão em um comando
+        run: cd /tmp/fixture && memory install --sem-bancos
 
       - name: Protocolo neutro de extratores (o exemplo do repositório funciona)
         run: |

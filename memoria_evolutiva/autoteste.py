@@ -22,10 +22,23 @@ from .lib import config, raiz, titulo
 PULAR = {".git", "node_modules", "vendor", "__pycache__", ".code-review-graph"}
 
 
+def _caminho_relativo_local(base: Path, valor: object, campo: str) -> Path:
+    caminho = Path(str(valor))
+    try:
+        resolvido = (base / caminho).resolve()
+    except (OSError, RuntimeError) as exc:
+        raise ValueError(f"`{campo}` não pôde ser resolvido com segurança: {exc}") from exc
+    if caminho.is_absolute() or not resolvido.is_relative_to(base.resolve()):
+        raise ValueError(f"`{campo}` precisa ficar dentro da raiz do projeto")
+    return caminho
+
+
 def _copiar(de: Path, para: Path) -> None:
     para.mkdir(parents=True, exist_ok=True)
     for item in de.iterdir():
-        if item.name in PULAR:
+        # O autoteste não precisa materializar destinos externos e nunca deve seguir
+        # um link do projeto para fora da cópia temporária.
+        if item.name in PULAR or item.is_symlink():
             continue
         destino = para / item.name
         if item.is_dir():
@@ -63,12 +76,61 @@ def _rodar(tmp: Path, comando: str) -> tuple[int, str]:
 def main() -> int:
     c = config()
     projeto = c["projeto"]
-    origem = Path(raiz())
-    ger_dir = c["gerado"].get("diretorio", "docs/gerado").strip("/")
+    origem = Path(raiz()).resolve()
+    try:
+        ger_dir = _caminho_relativo_local(
+            origem, c["gerado"].get("diretorio", "docs/gerado"), "gerado.diretorio",
+        )
+        canonico_dir = _caminho_relativo_local(
+            origem, c["acervos"]["canonico"], "acervos.canonico",
+        )
+        codigo_dir = _caminho_relativo_local(
+            origem, c["gerado"].get("raiz", ""), "gerado.raiz",
+        )
+        politica_autonomia = _caminho_relativo_local(
+            origem,
+            c.get("autonomia", {}).get("politica", "docs/politicas/AUTONOMIA.md"),
+            "autonomia.politica",
+        )
+        cfg_grafo = c.get("grafo", {})
+        caminho_grafo = _caminho_relativo_local(
+            origem, cfg_grafo.get("arquivo", "graphify-out/graph.json"), "grafo.arquivo",
+        )
+        caminho_marcador_grafo = _caminho_relativo_local(
+            origem,
+            cfg_grafo.get("marcador", ".memoria/bancos/graphify.json"),
+            "grafo.marcador",
+        )
+        caminho_fragmentos = _caminho_relativo_local(
+            origem,
+            c.get("rag", {}).get("manifesto", "docs/gerado/manifesto-fragmentos-v2.json"),
+            "rag.manifesto",
+        )
+        caminho_avaliacao = _caminho_relativo_local(
+            origem,
+            c.get("avaliacao", {}).get(
+                "relatorio", "docs/gerado/relatorio-avaliacao-rag-v1.json"
+            ),
+            "avaliacao.relatorio",
+        )
+        ponteiros = [
+            _caminho_relativo_local(origem, valor, "ponteiros.arquivos")
+            for valor in c.get("ponteiros", {}).get("arquivos", [])
+        ]
+    except (OSError, ValueError) as exc:
+        print(f"ERRO — autoteste recusado: {exc}.")
+        return 1
+
     tem_cadeia = len(c.get("cadeia", {}).get("niveis", {})) > 1
-    tem_ponteiros = bool(c.get("ponteiros", {}).get("arquivos"))
+    tem_ponteiros = bool(ponteiros)
     tem_autonomia = bool(c.get("autonomia", {}).get("ativo"))
-    tem_grafo = bool(c.get("grafo", {}).get("ativo"))
+    arquivo_grafo = origem / caminho_grafo
+    marcador_grafo = origem / caminho_marcador_grafo
+    # `--adiar-bancos` mantém o Graphify obrigatório, mas deliberadamente ainda não
+    # cria o grafo. Nesse estado não existe artefato válido para o autoteste corromper.
+    tem_grafo = bool(
+        cfg_grafo.get("ativo") and arquivo_grafo.is_file() and marcador_grafo.is_file()
+    )
     tem_fragmentos = isinstance(c.get("rag", {}), dict)
     tem_adaptadores = isinstance(c.get("adaptadores", {}), dict)
     tem_avaliacao = isinstance(c.get("avaliacao", {}), dict)
@@ -81,7 +143,7 @@ def main() -> int:
             return
 
     def quebra_ponteiro(t: Path) -> None:
-        p = t / c["ponteiros"]["arquivos"][0]
+        p = t / ponteiros[0]
         p.write_text(p.read_text(encoding="utf-8") + "linha extra\n" * 60, encoding="utf-8")
 
     def quebra_ciclo(t: Path) -> None:
@@ -98,7 +160,7 @@ def main() -> int:
                        capture_output=True, cwd=str(t))
 
     def quebra_politica_autonoma(t: Path) -> None:
-        politica = t / str(c["autonomia"]["politica"])
+        politica = t / politica_autonomia
         politica.write_text(
             politica.read_text(encoding="utf-8").replace(
                 "comportamento executado", "preferência arbitrária"
@@ -107,7 +169,7 @@ def main() -> int:
         )
 
     def quebra_cobertura(t: Path) -> None:
-        codigo = t / c.get("gerado", {}).get("raiz", "").strip("/")
+        codigo = t / codigo_dir
         extensoes = {
             "." + str(ext).lower().lstrip(".")
             for ext in c.get("gerado", {}).get("extensoes", [])
@@ -118,13 +180,11 @@ def main() -> int:
                 return
 
     def quebra_grafo(t: Path) -> None:
-        grafo = t / str(c.get("grafo", {}).get("arquivo", "graphify-out/graph.json"))
+        grafo = t / caminho_grafo
         grafo.write_text("{corrompido", encoding="utf-8")
 
     def quebra_fragmentos(t: Path) -> None:
-        manifesto = t / str(c.get("rag", {}).get(
-            "manifesto", "docs/gerado/manifesto-fragmentos-v2.json"
-        ))
+        manifesto = t / caminho_fragmentos
         manifesto.write_text(
             manifesto.read_text(encoding="utf-8") + "\n",
             encoding="utf-8",
@@ -170,7 +230,7 @@ def main() -> int:
         )
 
     def quebra_avaliacao(t: Path) -> None:
-        caminho = t / str(c["avaliacao"]["relatorio"])
+        caminho = t / caminho_avaliacao
         caminho.write_text(
             caminho.read_text(encoding="utf-8") + "\n", encoding="utf-8"
         )
@@ -231,12 +291,12 @@ def main() -> int:
              quebra=quebra_cadeia_ok, comando="validar", esperado=0, contem=None, aplica=tem_cadeia),
         dict(nome="documento novo sem frontmatter aumenta a dívida",
              quebra=lambda t: _escrever(
-                 t / c["acervos"]["canonico"].strip("/") / "_teste_legado.md",
+                t / canonico_dir / "_teste_legado.md",
                  "# sem frontmatter\n"),
              comando="catraca", esperado=1, contem="dívida aumentou"),
         dict(nome="documento sem frontmatter NÃO é erro de estrutura",
              quebra=lambda t: _escrever(
-                 t / c["acervos"]["canonico"].strip("/") / "_teste_legado.md",
+                t / canonico_dir / "_teste_legado.md",
                  "# sem frontmatter\n"),
              comando="validar", esperado=0, contem=None),
         dict(nome="grafo corrompido reprova mesmo com hashes de fonte iguais",
@@ -270,6 +330,11 @@ def main() -> int:
     titulo(f"Autoteste do padrão — {projeto}")
     print("  cópia de trabalho: temporária; nada é alterado no seu projeto\n")
 
+    comandos_projeto_intacto = ["validar", "catraca"]
+    if tem_grafo:
+        comandos_projeto_intacto.append("bancos status --offline")
+    comandos_projeto_intacto.append("avaliar verificar")
+
     passou = falhou = pulados = 0
     relatos: list[tuple[str, str, str]] = []
 
@@ -297,8 +362,7 @@ def main() -> int:
                 t["quebra"](tmp)
 
                 comandos = ([t["comando"]] if t["comando"]
-                            else ["validar", "catraca", "bancos status --offline",
-                                  "avaliar verificar"])
+                            else comandos_projeto_intacto)
                 rc_final, saida_final = 0, ""
                 for cmd in comandos:
                     rc, saida = _rodar(tmp, cmd)

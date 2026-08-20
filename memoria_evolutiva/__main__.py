@@ -10,11 +10,12 @@ from __future__ import annotations
 import sys
 
 
-AJUDA = """memoria — memória evolutiva do projeto
+AJUDA = """memory / memoria — memória evolutiva do projeto
 
-Uso: memoria <comando> [opções]
+Uso recomendado: memory install
+Compatibilidade: memoria instalar
 
-  instalar   --projeto=NOME --codigo=PASTA [--adiar-bancos|--sem-bancos] [--sem-agendamento]
+  install / instalar   instalação autônoma completa; nome e código são detectados
   diagnosticar [--json]  inventário factual; não escreve no projeto
   analisar    [--json]  consolida evidências e lacunas; não escreve no projeto
   propor-documentacao   legado: cria rascunhos opcionais, sem sobrescrever
@@ -35,7 +36,7 @@ Uso: memoria <comando> [opções]
   autoteste  quebra uma cópia de propósito e confere que os validadores reclamam
   skill      [--conferir] [--saida=DIR]  gera a peça de procedimento a partir do runbook
 
-Rode sempre a partir da raiz do projeto (onde está o padrao.json).
+Rode a partir da raiz do projeto; na primeira instalação, o padrao.json será criado ali.
 """
 
 
@@ -47,23 +48,12 @@ def main() -> int:
 
     argv = sys.argv[1:]
     cmd = argv[0] if argv else None
+    cmd = {"install": "instalar"}.get(cmd, cmd)
     resto = argv[1:]
 
     if cmd == "verificar":
-        # A bateria de fim de sessão e de CI local — um nome só para lembrar.
-        from . import validar, catraca, bancos, skill, adaptadores, avaliacao
-        pior = 0
-        for fn in (
-            lambda: validar.main(),
-            lambda: catraca.main([]),
-            lambda: bancos.status(),
-            lambda: adaptadores.verificar(),
-            lambda: avaliacao.verificar(),
-            lambda: skill.main(["--conferir"]),
-        ):
-            rc = fn()
-            pior = max(pior, rc)
-        return pior
+        from . import verificacao
+        return verificacao.main(resto)
 
     if cmd == "instalar":
         from . import instalar

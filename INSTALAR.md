@@ -73,8 +73,14 @@ ser local ou remoto. O instalador inicia o daemon de loopback sob demanda; segre
 entra em `padrao.json`.
 
 ```bash
-memoria instalar --projeto="meu-app" --codigo=src
+memory install
 ```
+
+Esse é o único comando por projeto. O instalador usa o nome da pasta atual e descobre a
+raiz do código entre `src`, `app`, `lib`, `packages`, `source` e `.`. Se houver fontes em
+mais de uma área, escolhe `.` para cobrir todas. Em reinstalações, preserva a identidade
+e a raiz já gravadas em `padrao.json`. O comando legado `memoria instalar` permanece como
+alias compatível, mas não é necessário no fluxo novo.
 
 Ele publica a árvore e os moldes, detecta as linguagens, calcula SHA-256 de todas as
 fontes configuradas, produz o núcleo estrutural, mede a dívida inicial, valida, atualiza
@@ -85,6 +91,15 @@ Também gera o manifesto neutro e as entradas de Codex, Claude, Cursor, Windsurf
 Uma sessão nova inicia pelo canary específico e não pede avaliação humana do conteúdo.
 O instalador cria ainda três casos mínimos de avaliação, mede uma baseline somente se
 todos passarem e grava relatório/manifesto reconstruíveis da qualidade do RAG.
+Também gera e confere a skill do projeto, executa a catraca agregada completa e quebra
+uma cópia temporária no autoteste para provar que os validadores detectam falhas reais.
+Só então registra e confirma a manutenção diária. Se qualquer etapa falhar, o comando
+termina com erro e não apresenta a instalação como pronta.
+
+Quando esse comando termina com código zero, a instalação acabou. Não execute
+`memoria gerar`, `memoria skill`, `memoria verificar`, `memoria autoteste` nem
+`memoria agendador instalar` como passos adicionais: todos já foram incorporados ao
+fechamento automático.
 
 `--codigo` é a pasta que o gerador varre (`src`, `app`, `lib`, `packages`...). Hindsight
 e Graphify já são padrão; não existe decisão por projeto sobre qual ferramenta usar.
@@ -92,6 +107,8 @@ e Graphify já são padrão; não existe decisão por projeto sobre qual ferrame
 A instalação completa também registra a atualização diária às 02:15. O opt-out
 `--sem-agendamento` existe para hosts que proíbem tarefas do usuário; ele não altera a
 configuração segura nem concede acesso ao banco da aplicação.
+`--sem-autoteste` existe para testes repetitivos do próprio pacote ou ambientes muito
+restritos; o fluxo normal não usa essa opção.
 
 Ele troca `<NOME-DO-PROJETO>` pelo nome real nos modelos e transforma
 `docs/cronologia/AAAA-MM.md` no mês corrente. O `padrao.json` publicado vem com o nome
@@ -103,7 +120,7 @@ decisão sua ele nunca sobrescreve. Rodar de novo não estraga nada.
 > `projeto:` de cada documento com o do `padrao.json` — confira na saída do instalador
 > que o nome que apareceu é o seu.
 
-## 3. Manutenção autônoma
+## 3. Manutenção autônoma — não é continuação da instalação
 
 ```bash
 memoria ciclo iniciar --plataforma=codex --perfil=engenharia-leitura --json
@@ -111,7 +128,9 @@ memoria ciclo atualizar --plataforma=codex --perfil=engenharia-leitura --json
 memoria agendador status --json
 ```
 
-O primeiro comando usa um canary rápido e só repara quando detecta estado velho. O
+Esses comandos são gatilhos posteriores para sessões e diagnósticos; nenhum deles é
+necessário para concluir a primeira instalação. O primeiro usa um canary rápido e só
+repara quando detecta estado velho. O
 segundo atualiza apenas documentos gerenciados, regenera os derivados, valida, sincroniza
 Hindsight+Graphify e repete o canary. Os cinco adaptadores recebem esses gatilhos durante
 a instalação; não há proposta intermediária nem promoção humana.
@@ -148,7 +167,7 @@ A IA não decide qual estrutura prefere: usa esta. Também não decide se uma hi
 "parece provável": sem fonte suficiente, escreve `indeterminado` e segue para o próximo
 item de `docs/ABERTO.md`.
 
-## 5. Verificação automática
+## 5. Verificação automática já executada pelo instalador
 
 ```bash
 memoria documentar
@@ -156,9 +175,12 @@ memoria autoteste
 memoria executar --run-id=primeira-verificacao --acao=verificar --json
 ```
 
-O primeiro comando relê fontes, atualiza os documentos gerenciados, regenera derivados e
-valida. O segundo quebra uma cópia temporária e comprova que política alterada, cobertura
-velha, âncora morta, cadeia inválida e dívida crescente não passam silenciosamente.
+Esses comandos permitem repetir ou diagnosticar as verificações depois da instalação;
+não são passos obrigatórios. O primeiro relê fontes, atualiza os documentos gerenciados,
+regenera derivados e valida. O segundo quebra uma cópia temporária e comprova que
+política alterada, cobertura velha, âncora morta, cadeia inválida e dívida crescente não
+passam silenciosamente. Na instalação padrão, ambos os efeitos e a verificação agregada
+já são executados automaticamente.
 
 ### Os dois bancos locais
 
@@ -210,7 +232,7 @@ Comece cada sessão pelo `PROJETO.md`, feche cada sessão pelo runbook, e deixe 
 
 | Script | O que faz | Falha quando |
 |---|---|---|
-| `memoria instalar` | instala, documenta, valida e sincroniza os bancos | etapa ou provedor local não confirma |
+| `memory install` | fecha docs, RAG, adaptadores, skill, verificações, autoteste, bancos e agendamento | qualquer etapa ou provedor local não confirma |
 | `memoria documentar` | relê, atualiza, gera, valida e sincroniza | política, cobertura, estrutura ou banco diverge |
 | `memoria diagnosticar` | inventário factual, sem escrita | configuração inválida |
 | `memoria analisar` | consolida evidências e lacunas, sem escrita | configuração inválida |

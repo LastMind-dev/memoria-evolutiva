@@ -18,11 +18,152 @@ from unittest import mock
 from memoria_evolutiva.fragmentos import _cabecalhos, _partir_texto, consultaveis
 from memoria_evolutiva.lib import bytes_canonicos, hash_do_conteudo, sha256_canonico
 from memoria_evolutiva import (
-    agendador, ciclo, contexto, executor, grafo, hindsight, provisao, seguranca,
+    agendador, autoteste, ciclo, contexto, executor, grafo, hindsight, instalar,
+    provisao, seguranca, skill, verificacao,
 )
 
 
 REPOSITORIO = Path(__file__).resolve().parents[1]
+
+
+class FechamentoInstalacaoTest(unittest.TestCase):
+    def test_fechamento_executa_skill_verificacao_e_autoteste_na_ordem(self) -> None:
+        ordem: list[str] = []
+        with (
+            mock.patch.object(skill, "main", side_effect=lambda _: ordem.append("skill") or 0),
+            mock.patch.object(
+                verificacao, "executar",
+                side_effect=lambda **_: ordem.append("verificacao") or 0,
+            ) as verificar,
+            mock.patch.object(
+                autoteste, "main", side_effect=lambda: ordem.append("autoteste") or 0,
+            ),
+        ):
+            rc = instalar._fechar_instalacao(
+                incluir_bancos=True, executar_autoteste=True,
+            )
+
+        self.assertEqual(0, rc)
+        self.assertEqual(["skill", "verificacao", "autoteste"], ordem)
+        verificar.assert_called_once_with(incluir_bancos=True)
+
+    def test_fechamento_falha_fechado_e_nao_executa_etapas_posteriores(self) -> None:
+        with (
+            mock.patch.object(skill, "main", return_value=1),
+            mock.patch.object(verificacao, "executar") as verificar,
+            mock.patch.object(autoteste, "main") as testar,
+        ):
+            rc = instalar._fechar_instalacao(
+                incluir_bancos=True, executar_autoteste=True,
+            )
+
+        self.assertEqual(1, rc)
+        verificar.assert_not_called()
+        testar.assert_not_called()
+
+    def test_fechamento_respeita_somente_opt_outs_explicitos(self) -> None:
+        with (
+            mock.patch.object(skill, "main", return_value=0),
+            mock.patch.object(verificacao, "executar", return_value=0) as verificar,
+            mock.patch.object(autoteste, "main") as testar,
+        ):
+            rc = instalar._fechar_instalacao(
+                incluir_bancos=False, executar_autoteste=False,
+            )
+
+        self.assertEqual(0, rc)
+        verificar.assert_called_once_with(incluir_bancos=False)
+        testar.assert_not_called()
+
+
+class AutotesteSegurancaTest(unittest.TestCase):
+    def test_caminho_configurado_nao_pode_escapar_da_copia_temporaria(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="teste-autoteste-caminho-") as tmp:
+            base = Path(tmp).resolve()
+            self.assertEqual(
+                Path("docs/gerado"),
+                autoteste._caminho_relativo_local(
+                    base, "docs/gerado", "gerado.diretorio",
+                ),
+            )
+            with self.assertRaisesRegex(ValueError, "precisa ficar dentro"):
+                autoteste._caminho_relativo_local(
+                    base, base.parent / "fora.json", "grafo.arquivo",
+                )
+            with self.assertRaisesRegex(ValueError, "precisa ficar dentro"):
+                autoteste._caminho_relativo_local(
+                    base, "../fora.json", "grafo.arquivo",
+                )
+
+
+class NomeProjetoAutomaticoTest(unittest.TestCase):
+    def test_nome_novo_vem_da_pasta_e_identidade_existente_e_preservada(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="teste-nome-projeto-") as tmp:
+            projeto = Path(tmp) / "nome-da-pasta"
+            projeto.mkdir()
+
+            self.assertEqual(
+                "nome-da-pasta", instalar._nome_projeto(str(projeto), None),
+            )
+            (projeto / "padrao.json").write_text(
+                json.dumps({"projeto": "identidade-estavel"}), encoding="utf-8",
+            )
+            self.assertEqual(
+                "identidade-estavel", instalar._nome_projeto(str(projeto), None),
+            )
+            self.assertEqual(
+                "sobrescrita-explicita",
+                instalar._nome_projeto(str(projeto), "sobrescrita-explicita"),
+            )
+
+    def test_instalacao_real_nao_exige_nome_repetido(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="teste-instalar-sem-nome-") as tmp:
+            projeto = Path(tmp) / "meu-projeto"
+            (projeto / "src").mkdir(parents=True)
+            (projeto / "src/app.py").write_text("print('ok')\n", encoding="utf-8")
+            env = os.environ.copy()
+            env["PYTHONPATH"] = str(REPOSITORIO) + os.pathsep + env.get("PYTHONPATH", "")
+            env["PYTHONUTF8"] = "1"
+
+            resultado = subprocess.run(
+                [sys.executable, "-m", "memoria_evolutiva", "install",
+                 "--sem-bancos", "--sem-agendamento", "--sem-autoteste"],
+                cwd=projeto, env=env, capture_output=True, text=True,
+                encoding="utf-8", timeout=120,
+            )
+
+            self.assertEqual(0, resultado.returncode, resultado.stdout + resultado.stderr)
+            configuracao = json.loads(
+                (projeto / "padrao.json").read_text(encoding="utf-8")
+            )
+            self.assertEqual("meu-projeto", configuracao["projeto"])
+            self.assertEqual("src", configuracao["gerado"]["raiz"])
+            self.assertIn("Estrutura do padrão — meu-projeto", resultado.stdout)
+
+    def test_raiz_do_codigo_e_detectada_sem_parametro(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="teste-raiz-codigo-") as tmp:
+            projeto = Path(tmp) / "projeto"
+            (projeto / "src").mkdir(parents=True)
+            (projeto / "src/app.py").write_text("print('src')\n", encoding="utf-8")
+
+            self.assertEqual("src", instalar._raiz_codigo(str(projeto), None))
+
+            (projeto / "scripts").mkdir()
+            (projeto / "scripts/job.py").write_text("print('job')\n", encoding="utf-8")
+            self.assertEqual(".", instalar._raiz_codigo(str(projeto), None))
+
+            (projeto / "padrao.json").write_text(
+                json.dumps({"gerado": []}), encoding="utf-8",
+            )
+            self.assertEqual(".", instalar._raiz_codigo(str(projeto), None))
+
+            (projeto / "padrao.json").write_text(
+                json.dumps({"gerado": {"raiz": "codigo-personalizado"}}),
+                encoding="utf-8",
+            )
+            self.assertEqual(
+                "codigo-personalizado", instalar._raiz_codigo(str(projeto), None),
+            )
 
 
 class CliEmProjetoTemporario(unittest.TestCase):
@@ -34,7 +175,8 @@ class CliEmProjetoTemporario(unittest.TestCase):
         (self.projeto / ".gitignore").write_text("privado/\n", encoding="utf-8")
 
         for args in (
-            ["instalar", "--projeto=fixture", "--codigo=src", "--sem-bancos"],
+            ["instalar", "--projeto=fixture", "--codigo=src", "--sem-bancos",
+             "--sem-autoteste"],
             ["gerar"],
             ["catraca", "--medir"],
         ):
@@ -627,8 +769,19 @@ class CliEmProjetoTemporario(unittest.TestCase):
         )
         cobertura = self.projeto / "docs/gerado/cobertura-codigo.md"
         self.assertIn("src/exemplo.php", cobertura.read_text(encoding="utf-8"))
-        validar = self.cli("validar")
-        self.assertEqual(0, validar.returncode, validar.stdout + validar.stderr)
+        self.assertTrue((self.projeto / "skill-memoria-evolutiva/SKILL.md").is_file())
+        verificar = self.cli("verificar")
+        self.assertEqual(0, verificar.returncode, verificar.stdout + verificar.stderr)
+
+    def test_instalacao_padrao_executa_autoteste_sem_comando_adicional(self) -> None:
+        resultado = self.cli(
+            "instalar", "--projeto=fixture", "--codigo=src", "--sem-bancos",
+        )
+
+        self.assertEqual(0, resultado.returncode, resultado.stdout + resultado.stderr)
+        self.assertIn("Os validadores pegam o que prometem.", resultado.stdout)
+        self.assertIn("INSTALAÇÃO AUTÔNOMA CONCLUÍDA", resultado.stdout)
+        self.assertIn("Nenhum outro comando de instalação é necessário", resultado.stdout)
 
     def test_documentar_atualiza_cobertura_e_reprova_politica_adulterada(self) -> None:
         fonte = self.projeto / "src/novo.php"
@@ -1470,13 +1623,18 @@ class CliEmProjetoTemporario(unittest.TestCase):
         self.assertIn("saída insegura", resultado.stdout)
 
     def test_skill_recusa_geracao_sem_runbook_obrigatorio(self) -> None:
+        marcador = self.projeto / "docs/.skill-gerada.json"
+        skill_gerada = self.projeto / "skill-memoria-evolutiva/SKILL.md"
+        marcador_anterior = marcador.read_bytes()
+        skill_anterior = skill_gerada.read_bytes()
         (self.projeto / "docs/runbooks/documentacao-autonoma.md").unlink()
 
         resultado = self.cli("skill")
 
         self.assertEqual(1, resultado.returncode, resultado.stdout + resultado.stderr)
         self.assertIn("faltam runbooks obrigatórios", resultado.stdout)
-        self.assertFalse((self.projeto / "docs/.skill-gerada.json").exists())
+        self.assertEqual(marcador_anterior, marcador.read_bytes())
+        self.assertEqual(skill_anterior, skill_gerada.read_bytes())
 
     def test_skill_marcador_corrompido_falha_sem_traceback(self) -> None:
         marcador = self.projeto / "docs/.skill-gerada.json"
