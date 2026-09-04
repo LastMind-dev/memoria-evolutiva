@@ -3030,5 +3030,98 @@ class ArtefatosDistribuidosTest(unittest.TestCase):
             )
 
 
+class OrigemResultadoHindsight(unittest.TestCase):
+    """Regressão: memórias derivadas do Hindsight só carregam a origem em `tags`."""
+
+    def test_origem_vem_de_metadata_quando_presente(self):
+        resultado = {"metadata": {"source_uri": "docs/PROJETO.md"}, "tags": []}
+        self.assertEqual(contexto._origens_resultado(resultado), ["docs/PROJETO.md"])
+
+    def test_origem_vem_da_tag_source_quando_metadata_vazio(self):
+        # Forma real devolvida por `memories/recall` para `type: observation`.
+        resultado = {
+            "id": "6f9c199d-ceb8-4b8e-8154-cbc231c4e23e",
+            "type": "observation",
+            "metadata": {},
+            "tags": ["vigente", "projeto:issqn", "commit:d9e1739b0",
+                     "source:docs/portal-nacional/FDD_MOTOR_UNICO_IMPORTACAO_NFSE.md"],
+        }
+        self.assertEqual(
+            contexto._origens_resultado(resultado),
+            ["docs/portal-nacional/FDD_MOTOR_UNICO_IMPORTACAO_NFSE.md"],
+        )
+
+    def test_metadata_tem_precedencia_sobre_a_tag(self):
+        resultado = {"metadata": {"source_uri": "docs/A.md"}, "tags": ["source:docs/B.md"]}
+        self.assertEqual(contexto._origens_resultado(resultado), ["docs/A.md"])
+
+    def test_sem_origem_devolve_lista_vazia(self):
+        self.assertEqual(contexto._origens_resultado({"metadata": {}, "tags": ["vigente"]}), [])
+        self.assertEqual(contexto._origens_resultado({"tags": "nao-e-lista"}), [])
+
+    def test_ancora_e_descartada_como_no_caminho_de_metadata(self):
+        resultado = {"metadata": {}, "tags": ["source:docs/X.md#secao-7"]}
+        self.assertEqual(contexto._origens_resultado(resultado), ["docs/X.md"])
+
+    def test_tag_so_com_ancora_nao_e_origem(self):
+        # Normaliza para "": não é origem, e precisa continuar contando como
+        # resultado sem origem em vez de virar uma origem vazia silenciosa.
+        resultado = {"metadata": {}, "tags": ["source:#secao"]}
+        self.assertEqual(contexto._origens_resultado(resultado), [])
+
+    def test_memoria_multi_origem_sinaliza_todas(self):
+        resultado = {"metadata": {}, "type": "observation", "tags": [
+            "vigente", "source:docs/A.md", "source:docs/sub/B.md#secao-2",
+        ]}
+        self.assertEqual(
+            contexto._origens_resultado(resultado), ["docs/A.md", "docs/sub/B.md"]
+        )
+
+    def test_dedup_ocorre_depois_de_normalizar_a_ancora(self):
+        # Duas âncoras do mesmo arquivo são a mesma origem.
+        resultado = {"metadata": {}, "tags": ["source:docs/A.md#s1", "source:docs/A.md#s2"]}
+        self.assertEqual(contexto._origens_resultado(resultado), ["docs/A.md"])
+
+
+class SinaisSemanticosHindsight(unittest.TestCase):
+    """Pina o laço de `_sinais_semanticos`, não só o helper de origem."""
+
+    def _executar(self, resultados):
+        with (
+            mock.patch.object(contexto, "config", return_value={"memoria": {"ativo": True}}),
+            mock.patch.object(contexto.indice, "verificar", return_value=0),
+            mock.patch.object(contexto.hindsight, "consultar",
+                              return_value={"results": resultados}),
+        ):
+            return contexto._sinais_semanticos("pergunta", 2048)
+
+    def test_uma_memoria_multi_origem_pontua_cada_origem(self):
+        # Dois resultados: o segundo prende o decaimento por ordem, que um resultado
+        # só não exercita (`ordem` seria sempre 0).
+        sinais, avisos, fresco = self._executar([
+            {"metadata": {}, "text": "fato", "tags": ["source:docs/A.md", "source:docs/B.md"]},
+            {"metadata": {}, "text": "outro", "tags": ["source:docs/C.md", "source:docs/D.md"]},
+        ])
+        self.assertTrue(fresco)
+        self.assertEqual(sorted(sinais), ["docs/A.md", "docs/B.md", "docs/C.md", "docs/D.md"])
+        # Mesmo `base` entre as origens de um resultado: a ordem pertence ao
+        # resultado, não ao documento. E decai do primeiro para o segundo.
+        self.assertEqual(sinais["docs/A.md"][0][0], sinais["docs/B.md"][0][0])
+        self.assertEqual(sinais["docs/C.md"][0][0], sinais["docs/D.md"][0][0])
+        self.assertEqual(sinais["docs/A.md"][0][0], 0.25)
+        self.assertEqual(sinais["docs/C.md"][0][0], 0.125)
+        self.assertEqual(avisos, [])
+
+    def test_resultado_sem_origem_entra_no_aviso(self):
+        sinais, avisos, _ = self._executar([
+            {"metadata": {}, "text": "a", "tags": ["source:docs/A.md"]},
+            {"metadata": {}, "text": "b", "tags": ["vigente"]},
+            {"metadata": {}, "text": "c", "tags": ["source:#so-ancora"]},
+        ])
+        self.assertEqual(list(sinais), ["docs/A.md"])
+        self.assertEqual(len(avisos), 1)
+        self.assertIn("2 resultado(s) sem origem identificável", avisos[0])
+
+
 if __name__ == "__main__":
     unittest.main()

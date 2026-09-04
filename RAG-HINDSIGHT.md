@@ -21,7 +21,11 @@ usam somente o manifesto local com produto+tenant exatos.
 
 O gateway `memoria contexto` usa o recall apenas como sinal de ranking. Todo trecho
 documental devolvido vem do manifesto local verificado e é relido de `docs/`; resultado
-sem `source_uri` reconhecível é descartado.
+sem origem reconhecível é descartado. A origem vem de `metadata.source_uri` quando o
+recall devolve o documento, e da tag `source:<caminho>` quando devolve memória derivada
+(`type: observation`) — a derivação herda as tags, não o `metadata` do documento. Uma
+memória consolidada a partir de vários documentos carrega uma tag por origem e pontua
+todas: a ordem do recall pertence ao resultado, não a um documento escolhido entre eles.
 
 ---
 
@@ -106,7 +110,7 @@ mcp__hindsight__recall(
 
 Depois do `recall`, **sempre**:
 
-1. leia o `source_uri` de cada resultado que for usar;
+1. leia a origem de cada resultado que for usar (`metadata.source_uri`, ou a tag `source:`);
 2. **abra o arquivo** e leia de lá;
 3. confira `status` no frontmatter, e o `deriva_de` — `superado` não é resposta, e pai
    superado torna o filho suspeito mesmo estando verificado;

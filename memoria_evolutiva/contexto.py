@@ -191,17 +191,53 @@ def _carregar_manifesto() -> dict:
     return dados
 
 
-def _origem_resultado(resultado: dict) -> str | None:
+def _tag_valores(resultado: dict, prefixo: str) -> list[str]:
+    """Lê todo `prefixo:valor` das tags do recall. Ver `hindsight._item`, que as grava.
+
+    Devolve os valores crus, na ordem das tags e sem filtrar: normalizar, deduplicar
+    e descartar vazio é responsabilidade de quem chama — deduplicar aqui trataria
+    `docs/A.md#s1` e `docs/A.md#s2` como origens distintas.
+    """
+    tags = resultado.get("tags")
+    if not isinstance(tags, list):
+        return []
+    marcador = f"{prefixo}:"
+    return [
+        tag[len(marcador):].strip()
+        for tag in tags
+        if isinstance(tag, str) and tag.startswith(marcador)
+    ]
+
+
+def _origens_resultado(resultado: dict) -> list[str]:
     metadados = resultado.get("metadata")
     if isinstance(metadados, dict) and metadados.get("source_uri"):
-        return barras(str(metadados["source_uri"])).split("#", 1)[0]
+        return [barras(str(metadados["source_uri"])).split("#", 1)[0]]
     if resultado.get("source"):
-        return barras(str(resultado["source"])).split("#", 1)[0]
+        return [barras(str(resultado["source"])).split("#", 1)[0]]
+    # `recall` devolve memórias DERIVADAS do documento (`type: observation`): elas
+    # herdam `tags`, mas não o `metadata` que a indexação gravou no documento, então
+    # as duas rotas acima falham justamente nelas. Medido em 12 bancos reais: 144 de
+    # 661 resultados (22%) eram descartados, e 66% no projeto com o maior corpus —
+    # a perda cresce com a consolidação. A origem sobrevive como `source:<caminho>`.
+    # Uma memória consolidada a partir de vários documentos carrega uma tag por
+    # origem. Devolver só a primeira daria o bônus a um documento arbitrário e
+    # nenhum aos demais — pior que o comportamento anterior, que descartava tudo.
+    # Normalize antes de deduplicar: `docs/A.md#s1` e `docs/A.md#s2` são a mesma
+    # origem. E descarte o vazio — tag só com âncora normaliza para "", que não é
+    # origem e precisa continuar contando como resultado sem origem.
+    origens_tag: list[str] = []
+    for valor in _tag_valores(resultado, "source"):
+        rel = barras(valor).split("#", 1)[0]
+        if rel and rel not in origens_tag:
+            origens_tag.append(rel)
+    if origens_tag:
+        return origens_tag
     documento = str(resultado.get("document_id") or "")
     marcador = ":docs/"
     if marcador in documento:
-        return "docs/" + documento.split(marcador, 1)[1]
-    return None
+        return ["docs/" + documento.split(marcador, 1)[1]]
+    return []
 
 
 def _sinais_semanticos(
@@ -229,8 +265,8 @@ def _sinais_semanticos(
     for ordem, resultado in enumerate(resultados):
         if not isinstance(resultado, dict):
             continue
-        origem = _origem_resultado(resultado)
-        if not origem:
+        origens = _origens_resultado(resultado)
+        if not origens:
             sem_origem += 1
             continue
         # O Hindsight participa como sinal em modo sombra: ajuda a desempatar, mas não
@@ -238,13 +274,15 @@ def _sinais_semanticos(
         # genérico. A escala lexical chega a 10,75; manter cada metade do bônus
         # semântico em até 0,25 preserva a fonte exata e ainda promove documentos sem
         # match textual direto.
-        sinais.setdefault(origem, []).append((
-            0.25 / (ordem + 1), str(resultado.get("text") or "")
-        ))
+        for origem in origens:
+            sinais.setdefault(origem, []).append((
+                0.25 / (ordem + 1), str(resultado.get("text") or "")
+            ))
     avisos = []
     if sem_origem:
         avisos.append(
-            f"Hindsight devolveu {sem_origem} resultado(s) sem `source_uri`; foram ignorados."
+            f"Hindsight devolveu {sem_origem} resultado(s) sem origem identificável "
+            f"(nem `metadata.source_uri`, nem tag `source:`); foram ignorados."
         )
     return sinais, avisos, True
 
