@@ -22,14 +22,89 @@ def _cfg() -> dict:
 
 
 def _silencioso(funcao, *args, **kwargs):
-    with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
-        return funcao(*args, **kwargs)
+    """Executa sem sujar a saída JSON do ciclo, mas devolve o que foi impresso.
+
+    O ciclo roda sob `--json` e não pode deixar a etapa escrever no stdout. Descartar
+    o texto, porém, tornava toda falha diária indiagnosticável: o operador recebia
+    `a atualização documental autônoma falhou` e o motivo real morria aqui, sem chegar
+    ao journal. Devolver o capturado deixa quem chama decidir se vaza no erro.
+    """
+    fluxo = io.StringIO()
+    try:
+        with contextlib.redirect_stdout(fluxo), contextlib.redirect_stderr(fluxo):
+            return funcao(*args, **kwargs), fluxo.getvalue()
+    except BaseException as excecao:
+        # `lib.morre()` escreve o motivo e levanta `SystemExit(2)`; sem guardar o
+        # capturado aqui, o operador recebe `erro: "2"` — exatamente a opacidade que
+        # este módulo passou a evitar no caminho de retorno.
+        # Best-effort: uma excecao que recuse atribuicao (frozen dataclass,
+        # `__setattr__` proprio) nao pode virar `AttributeError` e engolir a
+        # falha real justo no caminho cujo proposito e diagnosticar.
+        with contextlib.suppress(Exception):
+            excecao._impresso = fluxo.getvalue()
+        raise
+
+
+_MARCA_ERRO = re.compile(r"^(x\s|ERROS?\b|FALHOU\b)", re.IGNORECASE)
+_CREDENCIAL_NA_URL = re.compile(
+    r"([a-z][a-z0-9+.-]*://)(?:[^\s/@]*@)?([^\s/?#]+)\S*", re.IGNORECASE
+)
+_SEGREDO_SOLTO = re.compile(
+    r"\b(bearer\s+|"
+    r"(?:token|senha|secret|api[_-]?key|access[_-]?token)[\"']?\s*[=:]\s*[\"']?)"
+    r"[^\s\"',}]+",
+    re.IGNORECASE,
+)
+
+
+def _sem_credencial(texto: str) -> str:
+    """Reduz qualquer URL a esquema+host.
+
+    `hindsight._pedir` inclui o endpoint verbatim no erro, e o endpoint aceita token
+    em query ou em userinfo. `provisao.garantir()` omite o endpoint de propósito —
+    deixar passar por aqui reabriria a invariante que aquele teste fecha.
+    """
+    texto = _CREDENCIAL_NA_URL.sub(r"\1\2", texto)
+    return _SEGREDO_SOLTO.sub(r"\1[removido]", texto)
+
+
+def _com_motivo(mensagem: str, impresso: str, limite: int = 3, largura: int = 200) -> str:
+    """Anexa as linhas que explicam a falha — não simplesmente as últimas.
+
+    `documentar.executar` imprime o rodapé DEPOIS de `validar` e `catraca` e só então
+    decide o `rc`, então as últimas linhas costumam ser boilerplate. Prefira as linhas
+    marcadas como erro e caia para as finais apenas quando não houver marca alguma.
+    """
+    linhas = [linha.strip() for linha in impresso.strip().splitlines() if linha.strip()]
+    # Janela a partir da PRIMEIRA linha marcada, e nao so as linhas marcadas: um
+    # cabecalho como `ERRO - faltam runbooks obrigatorios:` vem seguido da lista,
+    # e a lista e o que o operador precisa. Sem marca alguma, cai para o fim.
+    marcadas = [i for i, linha in enumerate(linhas) if _MARCA_ERRO.match(linha)]
+    inicio = marcadas[0] if marcadas else max(0, len(linhas) - limite)
+    escolhidas = linhas[inicio:inicio + limite]
+    motivo = " | ".join(_sem_credencial(linha)[:largura] for linha in escolhidas)
+    mensagem = _sem_credencial(mensagem)
+    return f"{mensagem}: {motivo}" if motivo else mensagem
 
 
 def _lock_mutacao():
     """Compartilha o lock do executor para impedir duas atualizações concorrentes."""
     cfg_executor = executor._cfg()
     return executor._Lock("ciclo-memoria", cfg_executor.get("lock_expira_segundos", 1200))
+
+
+def _mensagem_de_excecao(exc: BaseException) -> str:
+    """Mensagem legivel para o campo `erro`.
+
+    `SystemExit(2)` vira `str(exc) == "2"`, e um erro que comeca com `2:` no journal
+    parece codigo truncado em vez de diagnostico.
+    """
+    texto = str(exc).strip()
+    if not texto:
+        return "configuração inválida"
+    if texto.isdigit():
+        return f"a etapa encerrou com {type(exc).__name__} {texto}"
+    return texto
 
 
 def executar(acao: str, plataforma: str, perfil: str) -> tuple[int, dict]:
@@ -61,31 +136,50 @@ def executar(acao: str, plataforma: str, perfil: str) -> tuple[int, dict]:
             )
         saida["provedores"] = provisao.garantir()
         if acao == "iniciar":
-            rc, canary = _silencioso(adaptadores.canary, plataforma, perfil)
+            (rc, canary), impresso_canary = _silencioso(
+                adaptadores.canary, plataforma, perfil
+            )
             if rc != 0 and cfg.get("auto_reparar_no_inicio") is True:
                 with _lock_mutacao():
-                    if _silencioso(documentar.executar) != 0:
+                    rc_doc, impresso = _silencioso(documentar.executar)
+                    if rc_doc != 0:
                         saida["canary"] = canary
-                        saida["erro"] = "a reparação documental autônoma falhou"
+                        saida["erro"] = _com_motivo(
+                            "a reparação documental autônoma falhou", impresso
+                        )
                         return 1, saida
                 saida["auto_reparado"] = True
-                rc, canary = _silencioso(adaptadores.canary, plataforma, perfil)
+                (rc, canary), impresso_canary = _silencioso(
+                    adaptadores.canary, plataforma, perfil
+                )
         else:
             with _lock_mutacao():
-                if _silencioso(documentar.executar) != 0:
-                    saida["erro"] = "a atualização documental autônoma falhou"
+                rc_doc, impresso = _silencioso(documentar.executar)
+                if rc_doc != 0:
+                    saida["erro"] = _com_motivo(
+                        "a atualização documental autônoma falhou", impresso
+                    )
                     return 1, saida
-            rc, canary = _silencioso(adaptadores.canary, plataforma, perfil)
+            (rc, canary), impresso_canary = _silencioso(
+                adaptadores.canary, plataforma, perfil
+            )
         saida["canary"] = canary
         saida["ok"] = rc == 0
         if rc != 0:
-            saida["erro"] = "o canary não confirmou identidade, fontes e frescor"
+            saida["erro"] = _com_motivo(
+                "o canary não confirmou identidade, fontes e frescor", impresso_canary
+            )
         return (0 if saida["ok"] else 1), saida
     except (provisao.ProvisaoErro, executor.ExecutorErro, OSError, SystemExit) as exc:
-        saida["erro"] = str(exc) or "configuração inválida"
+        saida["erro"] = _com_motivo(
+            _mensagem_de_excecao(exc), getattr(exc, "_impresso", "")
+        )
         return 1, saida
     except Exception as exc:
-        saida["erro"] = f"falha interna controlada ({type(exc).__name__})"
+        saida["erro"] = _com_motivo(
+            f"falha interna controlada ({type(exc).__name__})",
+            getattr(exc, "_impresso", ""),
+        )
         return 1, saida
 
 

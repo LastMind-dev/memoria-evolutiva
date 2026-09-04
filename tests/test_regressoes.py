@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import contextlib
 import hashlib
+import io
 import json
 import os
 import re
@@ -2547,6 +2549,15 @@ class BancosLocaisTest(unittest.TestCase):
         self.assertNotIn("Traceback", status.stdout + status.stderr)
 
 
+def _sem_acento(texto: str) -> str:
+    import unicodedata
+
+    return "".join(
+        c for c in unicodedata.normalize("NFD", texto)
+        if unicodedata.category(c) != "Mn"
+    )
+
+
 class CicloAutonomoTest(unittest.TestCase):
     def test_inicio_verde_nao_reescreve_documentacao(self) -> None:
         canary = {"ok": True, "falhas": [], "frescor": "confirmado"}
@@ -2800,6 +2811,222 @@ class CicloAutonomoTest(unittest.TestCase):
 
         self.assertNotIn("endpoint", saida["hindsight"])
         self.assertNotIn("privado", repr(saida))
+
+
+    # --- o motivo da falha nao pode morrer dentro de `_silencioso` ---
+
+    # Ordem real de `documentar.executar`: `validar` e `catraca` imprimem o
+    # diagnostico, o rodape vem DEPOIS e so entao o `rc` e decidido. Um fixture que
+    # imprimisse o erro por ultimo esconderia justamente o caso que importa.
+    SAIDA_REAL_DE_DOCUMENTAR = (
+        "Estrutura da documentacao - issqn",
+        "ERROS (1):",
+        "  x docs/gerado/mapa-diretorios.md: desatualizado ou editado a mao.",
+        "Falhou.",
+        "Documentacao autonoma",
+        "  ~ docs/ESTADO.md",
+        "Revisao humana documental: nao obrigatoria.",
+        "Fatos sem prova permanecem `indeterminado`; acoes externas mantem autorizacoes.",
+    )
+
+    @staticmethod
+    def _ciclo_de_atualizacao(documentar_side, canary_ret=(0, {"ok": True})):
+        with (
+            mock.patch.object(ciclo, "_cfg", return_value={"auto_reparar_no_inicio": True}),
+            mock.patch.object(ciclo.adaptadores, "_plataformas", return_value=("codex",)),
+            mock.patch.object(
+                ciclo.adaptadores, "_perfil_canary", return_value="engenharia-leitura"
+            ),
+            mock.patch.object(ciclo.provisao, "garantir", return_value={"ok": True}),
+            mock.patch.object(ciclo, "_lock_mutacao", return_value=mock.MagicMock()),
+            mock.patch.object(ciclo.adaptadores, "canary", return_value=canary_ret),
+            mock.patch.object(ciclo.documentar, "executar", side_effect=documentar_side),
+        ):
+            return ciclo.executar("atualizar", "codex", "engenharia-leitura")
+
+    def test_motivo_sai_do_diagnostico_e_nao_do_rodape(self) -> None:
+        def falha(*_a, **_k):
+            for linha in CicloAutonomoTest.SAIDA_REAL_DE_DOCUMENTAR:
+                print(linha)
+            return 1
+
+        rc, saida = self._ciclo_de_atualizacao(falha)
+
+        self.assertEqual(1, rc)
+        self.assertFalse(saida["ok"])
+        self.assertIn("a atualizacao documental autonoma falhou", _sem_acento(saida["erro"]))
+        self.assertIn("mapa-diretorios.md", saida["erro"])
+        # O rodape nao pode roubar o lugar do diagnostico.
+        self.assertNotIn("Revisao humana documental", saida["erro"])
+        self.assertNotIn("Fatos sem prova", saida["erro"])
+
+    def test_erro_sem_nada_impresso_mantem_a_mensagem_limpa(self) -> None:
+        rc, saida = self._ciclo_de_atualizacao(lambda *a, **k: 1)
+
+        self.assertEqual(1, rc)
+        self.assertEqual(
+            "a atualizacao documental autonoma falhou", _sem_acento(saida["erro"])
+        )
+
+    def test_endpoint_com_token_nao_vaza_para_o_erro(self) -> None:
+        # `provisao.garantir()` omite o endpoint de proposito; o motivo nao pode
+        # reabrir esse buraco por outro caminho.
+        def falha(*_a, **_k):
+            print("ERRO Hindsight - indisponivel em "
+                  "http://usuario:segredo@127.0.0.1:8888?token=privado: timeout")
+            return 1
+
+        _rc, saida = self._ciclo_de_atualizacao(falha)
+
+        self.assertNotIn("privado", saida["erro"])
+        self.assertNotIn("segredo", saida["erro"])
+        self.assertNotIn("usuario", saida["erro"])
+        self.assertIn("127.0.0.1:8888", saida["erro"])
+
+    def test_motivo_tem_teto_de_tamanho(self) -> None:
+        def falha(*_a, **_k):
+            print("ERRO " + "z" * 5000)
+            return 1
+
+        _rc, saida = self._ciclo_de_atualizacao(falha)
+
+        self.assertLess(len(saida["erro"]), 400)
+
+    def test_motivo_sobrevive_quando_a_etapa_levanta(self) -> None:
+        # `lib.morre()` escreve no stderr e levanta SystemExit(2); sem captura no
+        # caminho de excecao o operador recebia so `2`.
+        def morre(*_a, **_k):
+            print("ERRO fatal: `acervos.canonico` precisa ficar dentro da raiz.",
+                  file=sys.stderr)
+            raise SystemExit(2)
+
+        rc, saida = self._ciclo_de_atualizacao(morre)
+
+        self.assertEqual(1, rc)
+        self.assertIn("acervos.canonico", saida["erro"])
+
+    def test_motivo_da_falha_do_canary_chega_ao_erro(self) -> None:
+        def canary_ruidoso(*_a, **_k):
+            print("ERRO frescor nao confirmado: docs/ESTADO.md")
+            return 1, {"ok": False, "falhas": ["frescor"]}
+
+        with (
+            mock.patch.object(ciclo, "_cfg", return_value={"auto_reparar_no_inicio": True}),
+            mock.patch.object(ciclo.adaptadores, "_plataformas", return_value=("codex",)),
+            mock.patch.object(
+                ciclo.adaptadores, "_perfil_canary", return_value="engenharia-leitura"
+            ),
+            mock.patch.object(ciclo.provisao, "garantir", return_value={"ok": True}),
+            mock.patch.object(ciclo, "_lock_mutacao", return_value=mock.MagicMock()),
+            mock.patch.object(ciclo.adaptadores, "canary", side_effect=canary_ruidoso),
+            mock.patch.object(ciclo.documentar, "executar", return_value=0),
+        ):
+            rc, saida = ciclo.executar("atualizar", "codex", "engenharia-leitura")
+
+        self.assertEqual(1, rc)
+        self.assertIn("canary", _sem_acento(saida["erro"]))
+        self.assertIn("docs/ESTADO.md", saida["erro"])
+
+    def test_silencioso_nao_deixa_a_etapa_sujar_a_saida_json(self) -> None:
+        fluxo = io.StringIO()
+        with contextlib.redirect_stdout(fluxo):
+            resultado, capturado = ciclo._silencioso(lambda: (print("ruido"), 7)[1])
+        self.assertEqual(7, resultado)
+        self.assertIn("ruido", capturado)
+        self.assertEqual("", fluxo.getvalue())
+
+    def test_janela_comeca_na_marca_e_carrega_o_detalhe(self) -> None:
+        NL = chr(10)
+        # Forma real de `skill.py`: cabecalho marcado seguido da lista que importa.
+        cabecalho_e_lista = NL.join([
+            "ERRO - faltam runbooks obrigatorios para gerar a skill:",
+            "  - docs/runbooks/sessao.md",
+            "  - docs/runbooks/indexacao.md",
+        ])
+        motivo = ciclo._com_motivo("abc", cabecalho_e_lista)
+        self.assertIn("sessao.md", motivo)
+        self.assertIn("indexacao.md", motivo)
+
+        # Forma real de `documentar`: a janela para no veredito e nao alcanca o rodape.
+        motivo = ciclo._com_motivo(
+            "abc", NL.join(CicloAutonomoTest.SAIDA_REAL_DE_DOCUMENTAR)
+        )
+        self.assertIn("mapa-diretorios.md", motivo)
+        self.assertNotIn("Revisao humana", motivo)
+
+        # Sem marca alguma, cai para as ultimas linhas.
+        self.assertEqual(
+            "abc: b | c | d", ciclo._com_motivo("abc", NL.join(["a", "b", "c", "d"]))
+        )
+        self.assertEqual("abc", ciclo._com_motivo("abc", "   " + NL + NL + "  "))
+
+    def test_janela_pode_arrastar_uma_linha_seguinte_e_isso_e_aceito(self) -> None:
+        # Preco deliberado da janela: uma linha de erro solta arrasta o que vem
+        # depois. Vale a pena porque e o mesmo mecanismo que preserva a lista de
+        # detalhes do teste acima, e o rodape so entra quando nao ha erro suficiente
+        # para encher a janela.
+        NL = chr(10)
+        motivo = ciclo._com_motivo(
+            "abc", NL.join(["relatorio", "", "  x quebrou aqui", "rodape inofensivo"])
+        )
+        self.assertEqual("abc: x quebrou aqui | rodape inofensivo", motivo)
+
+    def test_segredo_fora_de_url_tambem_e_redigido(self) -> None:
+        redigido = ciclo._sem_credencial(
+            "detail: bad token=abc123def, Bearer xyz789, api_key: k9"
+        )
+        for segredo in ("abc123def", "xyz789", "k9"):
+            self.assertNotIn(segredo, redigido)
+
+    def test_segredo_em_forma_json_tambem_e_redigido(self) -> None:
+        # Shape provavel do corpo que `hindsight._pedir` embute no erro.
+        aspas = chr(34)
+        corpo = "{" + aspas + "token" + aspas + ":" + aspas + "abc123def" + aspas + "}"
+        redigido = ciclo._sem_credencial(corpo)
+        self.assertNotIn("abc123def", redigido)
+        self.assertIn("[removido]", redigido)
+        # A chave e o fechamento continuam legiveis: redigir nao pode virar ruido.
+        self.assertIn("token", redigido)
+        self.assertTrue(redigido.endswith("}"))
+
+    def test_caminho_com_token_ou_secret_no_nome_nao_e_mutilado(self) -> None:
+        # O risco de falso positivo da regra: nome de arquivo nao e credencial.
+        for linha in (
+            "x docs/politicas/token.md: desatualizado",
+            "ERRO - nao existe docs/gerado/secret-map.md",
+        ):
+            self.assertEqual(linha, ciclo._sem_credencial(linha))
+
+    def test_excecao_sem_mensagem_usa_o_texto_acentuado_do_agendador(self) -> None:
+        # `agendador.py` emite a forma acentuada para a mesma condicao; divergir
+        # faria a mesma falha aparecer de dois jeitos no journal.
+        self.assertEqual(
+            "configura\u00e7\u00e3o inv\u00e1lida", ciclo._mensagem_de_excecao(OSError())
+        )
+
+    def test_url_de_qualquer_esquema_perde_a_credencial(self) -> None:
+        self.assertEqual(
+            "postgres://10.0.0.5:5432",
+            ciclo._sem_credencial("postgres://usuario:segredo@10.0.0.5:5432/banco"),
+        )
+
+    def test_codigo_de_saida_nu_vira_mensagem_legivel(self) -> None:
+        self.assertEqual(
+            "a etapa encerrou com SystemExit 2", ciclo._mensagem_de_excecao(SystemExit(2))
+        )
+        self.assertEqual("disco cheio", ciclo._mensagem_de_excecao(OSError("disco cheio")))
+
+    def test_excecao_que_recusa_atributo_nao_mascara_a_falha(self) -> None:
+        class Imutavel(Exception):
+            def __setattr__(self, nome, valor):
+                raise AttributeError("imutavel")
+
+        def levanta(*_a, **_k):
+            raise Imutavel("motivo original")
+
+        with self.assertRaises(Imutavel) as capturado:
+            ciclo._silencioso(levanta)
+        self.assertIn("motivo original", str(capturado.exception))
 
 
 class ArtefatosDistribuidosTest(unittest.TestCase):
