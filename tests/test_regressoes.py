@@ -3257,6 +3257,70 @@ class ArtefatosDistribuidosTest(unittest.TestCase):
             )
 
 
+class EndpointNaoVazaNoErroTest(unittest.TestCase):
+    """`_endpoint` recusa userinfo, mas nao recusa query: `?token=...` e valido."""
+
+    def test_endpoint_publico_remove_query_e_fragmento(self) -> None:
+        casos = {
+            "http://127.0.0.1:8888?token=privado": "http://127.0.0.1:8888",
+            "http://127.0.0.1:8888/base#frag": "http://127.0.0.1:8888/base",
+            "http://127.0.0.1:8888": "http://127.0.0.1:8888",
+        }
+        for entrada, esperado in casos.items():
+            with mock.patch.dict(os.environ, {"MEMORIA_HINDSIGHT_URL": entrada}):
+                with mock.patch.object(hindsight, "_cfg", return_value={}):
+                    self.assertEqual(esperado, hindsight._endpoint_publico())
+
+    # `_requisitar` le `timeout_segundos` do proprio `_cfg`, cujo padrao e 300. Os
+    # testes abaixo dependem do SO RECUSAR a conexao; num host que a DESCARTA cada um
+    # bloquearia cinco minutos. Um segundo basta para provar o caminho de erro.
+    CFG_PORTA_FECHADA = {"modo": "local", "timeout_segundos": 1}
+    ALVO_FECHADO = "http://127.0.0.1:1?token=privado"
+
+    @classmethod
+    def _erro_real_de_indisponibilidade(cls):
+        """Excecao que o proprio `_requisitar` produz — nao uma mensagem inventada."""
+        with mock.patch.dict(os.environ, {"MEMORIA_HINDSIGHT_URL": cls.ALVO_FECHADO}):
+            with mock.patch.object(
+                hindsight, "_cfg", return_value=cls.CFG_PORTA_FECHADA
+            ):
+                try:
+                    hindsight._requisitar("GET", "/v1/default/banks")
+                except hindsight.HindsightErro as exc:
+                    return exc
+        raise AssertionError("esperava HindsightErro com a porta fechada")
+
+    def test_erro_de_indisponibilidade_nao_carrega_o_token(self) -> None:
+        mensagem = str(self._erro_real_de_indisponibilidade())
+        self.assertNotIn("privado", mensagem)
+        self.assertNotIn("token", mensagem)
+        # Host e porta continuam la: o operador precisa saber onde falhou.
+        self.assertIn("127.0.0.1:1", mensagem)
+
+    def test_aviso_do_contexto_nao_propaga_o_token(self) -> None:
+        # A cadeia completa: o erro vira aviso e o aviso sai no envelope que os
+        # agentes leem. Usa a excecao REAL — fabricar a mensagem aqui tornaria o
+        # teste circular.
+        erro_real = self._erro_real_de_indisponibilidade()
+
+        with (
+            mock.patch.object(
+                contexto, "config", return_value={"memoria": {"ativo": True}}
+            ),
+            mock.patch.object(contexto.indice, "verificar", return_value=0),
+            mock.patch.object(contexto.hindsight, "consultar", side_effect=erro_real),
+        ):
+            _sinais, avisos, _fresco = contexto._sinais_semanticos("pergunta", 2048)
+
+        self.assertTrue(avisos, "esperava um aviso de indisponibilidade")
+        for aviso in avisos:
+            self.assertNotIn("privado", aviso)
+        self.assertTrue(
+            any("127.0.0.1:1" in aviso for aviso in avisos),
+            "o operador precisa saber onde falhou",
+        )
+
+
 class OrigemResultadoHindsight(unittest.TestCase):
     """Regressão: memórias derivadas do Hindsight só carregam a origem em `tags`."""
 

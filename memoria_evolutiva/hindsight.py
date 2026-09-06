@@ -126,6 +126,19 @@ def _endpoint() -> str:
     return endpoint
 
 
+def _endpoint_publico() -> str:
+    """Endpoint sem query nem fragmento, para entrar em mensagem de erro.
+
+    A validacao de `_endpoint` recusa userinfo, mas nao recusa query: um
+    `?token=...` e um endpoint valido. Mensagem de erro nao fica no processo — ela
+    viaja para `contexto._sinais_semanticos`, vira aviso e sai no envelope que os
+    agentes leem, e tambem e impressa por `bancos`. Host e porta bastam para
+    diagnosticar; o resto nao precisa sair daqui.
+    """
+    partes = urllib.parse.urlsplit(_endpoint())
+    return urllib.parse.urlunsplit((partes.scheme, partes.netloc, partes.path, "", ""))
+
+
 def _banco() -> str:
     banco = str(_cfg().get("banco") or config()["projeto"]).strip()
     if not banco or any(ch in banco for ch in "/?#"):
@@ -171,7 +184,9 @@ def _requisitar(metodo: str, caminho: str, payload: dict | None = None,
         detalhe = exc.read().decode("utf-8", errors="replace")[:1000]
         raise HindsightErro(f"Hindsight respondeu HTTP {exc.code}: {detalhe}") from exc
     except (urllib.error.URLError, TimeoutError, OSError, ValueError) as exc:
-        raise HindsightErro(f"Hindsight indisponível em {_endpoint()}: {exc}") from exc
+        raise HindsightErro(
+            f"Hindsight indisponível em {_endpoint_publico()}: {exc}"
+        ) from exc
 
 
 def _documentos() -> tuple[dict[str, str], dict[str, str]]:
