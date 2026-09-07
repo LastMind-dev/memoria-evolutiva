@@ -19,9 +19,11 @@ from unittest import mock
 
 from memoria_evolutiva.fragmentos import _cabecalhos, _partir_texto, consultaveis
 from memoria_evolutiva import __version__
-from memoria_evolutiva.lib import bytes_canonicos, hash_do_conteudo, sha256_canonico
+from memoria_evolutiva.lib import (bytes_canonicos, hash_do_conteudo,
+                                   sha256_canonico, url_sem_query)
 from memoria_evolutiva import (
-    agendador, autoteste, ciclo, contexto, executor, grafo, hindsight, instalar,
+    agendador, autoteste, ciclo, contexto, executor, grafo, hindsight, indice,
+    instalar, lib,
     provisao, seguranca, skill, verificacao,
 )
 
@@ -3028,6 +3030,80 @@ class CicloAutonomoTest(unittest.TestCase):
         with self.assertRaises(Imutavel) as capturado:
             ciclo._silencioso(levanta)
         self.assertIn("motivo original", str(capturado.exception))
+
+
+class MarcadorNaoPersisteCredencialTest(unittest.TestCase):
+    """O marcador e um arquivo versionado e commitado; query nele vira segredo em git."""
+
+    def test_url_sem_query_descarta_query_e_fragmento(self) -> None:
+        casos = {
+            "http://127.0.0.1:8888": "http://127.0.0.1:8888",
+            "http://127.0.0.1:8888?token=privado": "http://127.0.0.1:8888",
+            "http://host:1/base#frag": "http://host:1/base",
+        }
+        for entrada, esperado in casos.items():
+            self.assertEqual(esperado, url_sem_query(entrada))
+
+    def test_query_e_descartada_mesmo_sem_esquema(self) -> None:
+        # `urlsplit("host:8888?token=x")` reporta scheme vazio E query preenchida.
+        # Uma guarda que so olhasse o esquema devolveria o token intacto.
+        self.assertEqual("127.0.0.1:8888", url_sem_query("127.0.0.1:8888?token=privado"))
+        self.assertEqual("//host/path", url_sem_query("//host/path?token=privado"))
+
+    def test_os_dois_lados_caem_no_mesmo_padrao_sem_a_chave(self) -> None:
+        # Sem `memoria.endpoint` no padrao.json e sem variavel de ambiente, a escrita
+        # caia no loopback e a leitura em string vazia: marcador defasado para sempre
+        # num projeto de config enxuta. Um resolvedor so, um default so.
+        ambiente = {
+            k: v for k, v in os.environ.items() if k != "MEMORIA_HINDSIGHT_URL"
+        }
+        with mock.patch.dict(os.environ, ambiente, clear=True):
+            with mock.patch.object(hindsight, "_cfg", return_value={"modo": "local"}):
+                escrita = hindsight._endpoint_publico()
+            leitura = indice._identidade_atual({"banco": "x"})["endpoint"]
+
+        self.assertEqual(escrita, leitura)
+        self.assertEqual(lib.ENDPOINT_HINDSIGHT_PADRAO, escrita)
+
+    def test_url_sem_query_devolve_intacto_o_que_nao_e_url(self) -> None:
+        # `indice` chama isto sobre um valor de config que pode vir vazio.
+        for valor in ("", "nao-e-url", "/caminho/solto"):
+            self.assertEqual(valor, url_sem_query(valor))
+
+    def test_prova_gravada_no_marcador_nao_carrega_query(self) -> None:
+        # Prende o LADO DA ESCRITA. O teste de simetria abaixo chama o helper direto,
+        # entao nao percebia se `verificar_ao_vivo` voltasse a usar `_endpoint()` —
+        # foi uma mutacao que revelou o furo. A asercao e sobre o payload inteiro,
+        # e nao so sobre o campo, para pegar qualquer outra rota ate o marcador.
+        alvo = "http://127.0.0.1:8888?token=privado"
+        with (
+            mock.patch.dict(os.environ, {"MEMORIA_HINDSIGHT_URL": alvo}),
+            mock.patch.object(hindsight, "_cfg", return_value={"modo": "local"}),
+            mock.patch.object(
+                hindsight, "_documentos",
+                return_value=({"docs/A.md": "corpo"}, {"docs/A.md": "hash"}),
+            ),
+            mock.patch.object(hindsight, "_banco", return_value="teste"),
+            mock.patch.object(hindsight, "_conteudo_indexado", return_value="indexado"),
+            mock.patch.object(hindsight, "_confirmar_documento", return_value=1),
+        ):
+            prova = hindsight.verificar_ao_vivo()
+
+        self.assertEqual("http://127.0.0.1:8888", prova["endpoint"])
+        self.assertNotIn("privado", json.dumps(prova, ensure_ascii=False))
+
+    def test_escrita_e_leitura_normalizam_igual(self) -> None:
+        # A invariante de verdade: o que o marcador grava tem de bater com o que a
+        # verificacao reconstroi. Normalizar so um lado deixa o marcador defasado
+        # para sempre — que e o motivo de nao ter bastado redigir a escrita.
+        alvo = "http://127.0.0.1:8888?token=privado"
+        with mock.patch.dict(os.environ, {"MEMORIA_HINDSIGHT_URL": alvo}):
+            with mock.patch.object(hindsight, "_cfg", return_value={"modo": "local"}):
+                gravado = hindsight._endpoint_publico()
+            lido = indice._identidade_atual({"endpoint": alvo, "banco": "x"})["endpoint"]
+
+        self.assertEqual(gravado, lido)
+        self.assertNotIn("privado", gravado)
 
 
 class VersaoUnicaTest(unittest.TestCase):

@@ -17,7 +17,8 @@ from pathlib import Path
 from threading import BoundedSemaphore, Lock
 
 from . import __version__, indice, seguranca
-from .lib import commit_atual, config, frontmatter, raiz
+from .lib import (commit_atual, config, endpoint_bruto, frontmatter, raiz,
+                  url_sem_query)
 
 
 class HindsightErro(RuntimeError):
@@ -113,9 +114,7 @@ def _cfg() -> dict:
 
 
 def _endpoint() -> str:
-    endpoint = os.environ.get(
-        "MEMORIA_HINDSIGHT_URL", str(_cfg().get("endpoint", "http://127.0.0.1:8888"))
-    ).rstrip("/")
+    endpoint = endpoint_bruto(_cfg())
     partes = urllib.parse.urlsplit(endpoint)
     if partes.scheme not in {"http", "https"} or not partes.hostname:
         raise HindsightErro("`memoria.endpoint` precisa ser uma URL HTTP(S) válida")
@@ -135,8 +134,7 @@ def _endpoint_publico() -> str:
     agentes leem, e tambem e impressa por `bancos`. Host e porta bastam para
     diagnosticar; o resto nao precisa sair daqui.
     """
-    partes = urllib.parse.urlsplit(_endpoint())
-    return urllib.parse.urlunsplit((partes.scheme, partes.netloc, partes.path, "", ""))
+    return url_sem_query(_endpoint())
 
 
 def _banco() -> str:
@@ -344,7 +342,9 @@ def verificar_ao_vivo() -> dict:
             lambda item: _confirmar_documento(banco, item[0], item[1]), tarefas
         ))
     return {
-        "endpoint": _endpoint(),
+        # Gravado num arquivo versionado e commitado (`docs/.hindsight-indexado.json`):
+        # query aqui viraria segredo persistido em git, nao erro transitorio.
+        "endpoint": _endpoint_publico(),
         "banco": banco,
         "documentos": len(hashes),
         "memorias_persistidas": unidades,

@@ -19,6 +19,7 @@ import os
 import re
 import subprocess
 import sys
+import urllib.parse
 from functools import lru_cache
 from pathlib import Path
 
@@ -33,6 +34,41 @@ def barras(caminho: str) -> str:
     num documento.
     """
     return caminho.replace("\\", "/")
+
+
+ENDPOINT_HINDSIGHT_PADRAO = "http://127.0.0.1:8888"
+
+
+def endpoint_bruto(memoria_cfg: dict) -> str:
+    """Resolve o endpoint configurado, sem validar.
+
+    Vive aqui porque os dois lados da identidade do marcador precisam do mesmo
+    resolvedor E do mesmo default: `hindsight` caia no loopback e `indice` caia em
+    string vazia era assimetria suficiente para deixar o marcador defasado para
+    sempre num projeto cujo `padrao.json` nao declarasse a chave.
+    """
+    do_ambiente = os.environ.get("MEMORIA_HINDSIGHT_URL")
+    if do_ambiente is not None:
+        return do_ambiente.rstrip("/")
+    return str(memoria_cfg.get("endpoint") or ENDPOINT_HINDSIGHT_PADRAO).rstrip("/")
+
+
+def url_sem_query(valor: str) -> str:
+    """Reduz uma URL a esquema, host e path, descartando query e fragmento.
+
+    Os dois lados da identidade do marcador precisam da MESMA normalizacao: o que
+    `hindsight.verificar_ao_vivo` grava em `prova_do_provedor` e o que
+    `indice.verificar` reconstroi para comparar. Normalizar so a escrita deixaria o
+    marcador permanentemente defasado. Vive aqui, e nao em `hindsight`, porque
+    `hindsight` importa `indice` — o caminho de volta seria ciclo.
+    """
+    if not valor:
+        return valor
+    partes = urllib.parse.urlsplit(valor)
+    if not partes.scheme and not partes.query and not partes.fragment:
+        # Nao e URL absoluta e nao ha nada a descartar: devolve intacto.
+        return valor
+    return urllib.parse.urlunsplit((partes.scheme, partes.netloc, partes.path, "", ""))
 
 
 def bytes_canonicos(conteudo: bytes) -> bytes:

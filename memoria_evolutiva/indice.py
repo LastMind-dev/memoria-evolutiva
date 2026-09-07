@@ -12,7 +12,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from . import seguranca
-from .lib import (acervo, comeca_com, commit_atual, config, hash_do_conteudo,
+from .lib import (acervo, comeca_com, commit_atual, config, endpoint_bruto,
+                  hash_do_conteudo, url_sem_query,
                   markdowns, morre, relativo, raiz, titulo)
 
 
@@ -47,6 +48,19 @@ def marcador_path() -> Path:
     if not destino.is_relative_to(base):
         morre("`memoria.marcador` precisa ficar dentro da raiz do projeto.\n")
     return destino
+
+
+def _identidade_atual(memoria_cfg: dict) -> dict:
+    """Reconstroi a identidade que o marcador deve confirmar.
+
+    Precisa produzir exatamente o que `hindsight.verificar_ao_vivo` gravou — mesma
+    normalizacao dos dois lados. Normalizar so um deixaria o marcador
+    permanentemente defasado, e o teste de simetria existe para segurar isso.
+    """
+    return {
+        "endpoint": url_sem_query(endpoint_bruto(memoria_cfg)),
+        "banco": str(memoria_cfg.get("banco") or config()["projeto"]),
+    }
 
 
 def gravar_marcador(prova: dict) -> None:
@@ -94,12 +108,7 @@ def verificar(silencioso: bool = False) -> int:
 
     ref = estado.get("documentos", {})
     prova = estado.get("prova_do_provedor", {})
-    identidade_atual = {
-        "endpoint": os.environ.get(
-            "MEMORIA_HINDSIGHT_URL", str(m.get("endpoint", ""))
-        ).rstrip("/"),
-        "banco": str(m.get("banco") or config()["projeto"]),
-    }
+    identidade_atual = _identidade_atual(m)
     if (estado.get("schema") != 4 or estado.get("provedor") != "hindsight"
             or not isinstance(ref, dict) or not isinstance(prova, dict)
             or prova.get("confirmado") is not True
