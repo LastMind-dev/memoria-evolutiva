@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "memoria-evolutiva"
-version = "6.0.0"
+dynamic = ["version"]
 description = "Memória de projeto que sobrevive à troca de ferramenta e falha o build quando mente: docs/ canônico verificado, cadeia PRD-FDD-HLD-LLD-ADR, cronologia append-only, catraca de dívida e CI de integridade."
 readme = "README.md"
 license = { text = "MIT" }
@@ -24,6 +24,13 @@ local = [
 
 [tool.setuptools]
 packages = ["memoria_evolutiva"]
+
+# Fonte unica da versao. Declarar em dois lugares e o motivo de ninguem bumpar:
+# o `__version__` nao e so metadado de pacote — ele entra no `motor_versao` do
+# executor, que decide se um checkpoint pertence ao motor atual, e no
+# `gerador_versao` gravado nos artefatos de cada projeto.
+[tool.setuptools.dynamic]
+version = { attr = "memoria_evolutiva.__version__" }
 
 [tool.setuptools.package-data]
 memoria_evolutiva = ["stubs/**/*", "stubs/**/.*", "stubs/.cursor/rules/*", "stubs/.github/workflows/*", "schemas/*.json"]

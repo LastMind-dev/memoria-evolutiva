@@ -18,6 +18,7 @@ from pathlib import Path
 from unittest import mock
 
 from memoria_evolutiva.fragmentos import _cabecalhos, _partir_texto, consultaveis
+from memoria_evolutiva import __version__
 from memoria_evolutiva.lib import bytes_canonicos, hash_do_conteudo, sha256_canonico
 from memoria_evolutiva import (
     agendador, autoteste, ciclo, contexto, executor, grafo, hindsight, instalar,
@@ -766,7 +767,7 @@ class CliEmProjetoTemporario(unittest.TestCase):
         self.assertNotIn("<MEMORIA_EVOLUTIVA_ORIGEM_IMUTAVEL>", workflow)
         self.assertNotIn("memoria-evolutiva.git@main", workflow)
         self.assertTrue(
-            "memoria-evolutiva==6.0.0" in workflow
+            f"memoria-evolutiva=={__version__}" in workflow
             or re.search(r"memoria-evolutiva\.git@[0-9a-f]{40}", workflow)
         )
         cobertura = self.projeto / "docs/gerado/cobertura-codigo.md"
@@ -3029,6 +3030,48 @@ class CicloAutonomoTest(unittest.TestCase):
         self.assertIn("motivo original", str(capturado.exception))
 
 
+class VersaoUnicaTest(unittest.TestCase):
+    """A versao decide coisas, entao nao pode divergir nem parar no tempo.
+
+    `__version__` entra no `motor_versao` do executor, que valida se um checkpoint
+    pertence ao motor atual (`executor.py`), e no `gerador_versao` gravado nos
+    artefatos de cada projeto (`adaptadores.py`). Declarar em dois lugares foi o que
+    fez tres estados de codigo distintos alegarem a mesma versao.
+    """
+
+    def _pyproject(self) -> str:
+        return (REPOSITORIO / "pyproject.toml").read_text(encoding="utf-8")
+
+    def test_pyproject_nao_declara_versao_literal(self) -> None:
+        projeto = self._pyproject().split("[tool.setuptools", 1)[0]
+        self.assertNotIn(
+            'version = "', projeto,
+            "versao literal em [project]: volta a divergir de `__version__`",
+        )
+        self.assertIn('dynamic = ["version"]', projeto)
+
+    def test_pyproject_le_a_versao_do_pacote(self) -> None:
+        self.assertIn(
+            'attr = "memoria_evolutiva.__version__"', self._pyproject(),
+            "sem o attr, o build nao encontra versao nenhuma",
+        )
+
+    def test_metadata_instalada_concorda_com_o_modulo(self) -> None:
+        # Verde e mudo no job `regressoes`, que roda sem instalar; assertivo no
+        # `fluxo-completo`, que faz `pip install $GITHUB_WORKSPACE`. E o unico ponto
+        # que prova que a versao dinamica do pyproject resolveu para o valor certo.
+        import importlib.metadata as metadata
+
+        try:
+            instalada = metadata.version("memoria-evolutiva")
+        except metadata.PackageNotFoundError:
+            self.skipTest("pacote nao instalado neste ambiente")
+        self.assertEqual(__version__, instalada)
+
+    def test_versao_do_modulo_e_semver(self) -> None:
+        self.assertRegex(__version__, r"^\d+\.\d+\.\d+$")
+
+
 class ArtefatosDistribuidosTest(unittest.TestCase):
     def test_schema_do_manifesto_de_adaptadores_e_versionado(self) -> None:
         schema = json.loads((
@@ -3235,7 +3278,7 @@ class ArtefatosDistribuidosTest(unittest.TestCase):
             instalar.metadata, "distribution", return_value=DistribuicaoFalsa()
         ):
             self.assertEqual(
-                "memoria-evolutiva==6.0.0", instalar._origem_imutavel_ci()
+                f"memoria-evolutiva=={__version__}", instalar._origem_imutavel_ci()
             )
 
     def test_origem_ci_nao_injeta_metacaractere_no_workflow(self) -> None:
@@ -3253,7 +3296,7 @@ class ArtefatosDistribuidosTest(unittest.TestCase):
             instalar.metadata, "distribution", return_value=DistribuicaoFalsa()
         ):
             self.assertEqual(
-                "memoria-evolutiva==6.0.0", instalar._origem_imutavel_ci()
+                f"memoria-evolutiva=={__version__}", instalar._origem_imutavel_ci()
             )
 
 

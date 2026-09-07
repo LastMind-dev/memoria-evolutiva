@@ -78,7 +78,8 @@ memoria avaliar verificar --json
 O pacote ainda não foi publicado no PyPI. O `@main` acima serve apenas para o primeiro
 bootstrap. Ao instalar o padrão no projeto, o workflow gerado é fixado automaticamente
 no commit Git de 40 caracteres que originou o pacote; numa instalação de distribuição,
-usa `memoria-evolutiva==6.0.0`. Assim, a automação nunca depende de uma branch mutável.
+usa `memoria-evolutiva==<versão instalada>`. Assim, a automação nunca depende de uma
+branch mutável.
 URLs de origem que contenham usuário ou senha não são propagadas para o workflow.
 
 ## Os comandos

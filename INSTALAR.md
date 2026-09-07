@@ -46,7 +46,8 @@ pipx install --include-deps "memoria-evolutiva[local] @ git+https://github.com/L
 O pacote ainda não foi publicado no PyPI. O `@main` acima é somente o bootstrap. O
 instalador descobre a procedência PEP 610 do pacote e fixa o workflow documental no
 commit Git exato de 40 caracteres; se não houver uma origem Git pública e verificável,
-fixa a versão exata `memoria-evolutiva==6.0.0`. Uma URL com credencial embutida nunca é
+fixa a versão exata instalada, na forma `memoria-evolutiva==<versão>`. Uma URL com
+credencial embutida nunca é
 copiada para o projeto.
 
 Isso traz o comando `memoria` para o seu PATH. **Nenhum script é copiado para o seu
