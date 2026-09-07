@@ -936,6 +936,30 @@ class CliEmProjetoTemporario(unittest.TestCase):
         self.assertIn("precisam ser números inteiros", resultado.stdout)
         self.assertNotIn("Traceback", resultado.stdout + resultado.stderr)
 
+    def test_cobertura_no_envelope_distingue_pergunta_coberta_de_alheia(self) -> None:
+        # Fiacao, e nao o helper: os testes de unidade exercitavam `_cobertura`
+        # direto e nao percebiam se `construir` voltasse ao criterio antigo
+        # ("devolvi alguma linha?"). Foi uma mutacao que revelou o furo.
+        def envelope(pergunta: str) -> dict:
+            resultado = self.cli(
+                "contexto", f"--pergunta={pergunta}",
+                "--perfil=engenharia-leitura", "--json",
+            )
+            self.assertEqual(0, resultado.returncode, resultado.stdout + resultado.stderr)
+            return json.loads(resultado.stdout)
+
+        coberta = envelope("documentação do projeto")
+        # Um termo que casa e outro que nao: precisa DEVOLVER fonte para que o
+        # criterio antigo dissesse `confirmada`, senao a mutacao passa despercebida.
+        meia = envelope("documentação zzzqwerty")
+
+        self.assertEqual("confirmada", coberta["cobertura"])
+        self.assertTrue(meia["fontes"], "o caso precisa devolver fonte")
+        self.assertEqual(
+            "parcial", meia["cobertura"],
+            "termo da pergunta ausente do material entregue nao e cobertura",
+        )
+
     def test_contexto_json_rele_fontes_e_respeita_orcamento(self) -> None:
         resultado = self.cli(
             "contexto", "--pergunta=documentação do projeto",
@@ -3030,6 +3054,63 @@ class CicloAutonomoTest(unittest.TestCase):
         with self.assertRaises(Imutavel) as capturado:
             ciclo._silencioso(levanta)
         self.assertIn("motivo original", str(capturado.exception))
+
+
+class CoberturaReflitaAPerguntaTest(unittest.TestCase):
+    """O campo dizia so "devolvi alguma linha?", com o nome de outra coisa."""
+
+    ITENS = [{
+        "source_uri": "docs/portal-nacional/FDD_ADQUIRENTE.md#7-regras",
+        "doc_id": "FDD-ADQUIRENTE",
+        "trecho": "o adquirente obrigatorio no cindop do ibs-cbs",
+    }]
+
+    def _estado(self, pergunta: str) -> str:
+        return contexto._cobertura(pergunta, self.ITENS)[0]
+
+    def test_sem_fonte_alguma_continua_ausente(self) -> None:
+        # Contrato antigo preservado: e o unico estado que ja era honesto, e
+        # `CONTEXTO.md` acopla `ausente` a lista vazia.
+        self.assertEqual(("ausente", 0, 0), contexto._cobertura("qualquer coisa", []))
+
+    def test_todos_os_termos_presentes_confirma(self) -> None:
+        self.assertEqual(
+            ("confirmada", 2, 2),
+            contexto._cobertura("adquirente obrigatorio", self.ITENS),
+        )
+
+    def test_pergunta_alheia_ao_corpus_nao_confirma(self) -> None:
+        # Era `confirmada`, igual a pergunta certa, porque uma linha voltou.
+        for alheia in ("qual a capital da Mongolia", "zzzqwerty"):
+            self.assertEqual("parcial", self._estado(alheia), alheia)
+
+    def test_um_termo_faltando_ja_e_parcial(self) -> None:
+        self.assertEqual(
+            ("parcial", 1, 2),
+            contexto._cobertura("adquirente e revogacao", self.ITENS),
+        )
+
+    def test_zero_coberto_se_distingue_de_parcial_de_verdade(self) -> None:
+        # Sem a contagem, "nenhum termo bate" lia identico a "tres de quatro batem" —
+        # e nenhum termo batendo e exatamente a patologia que motivou a mudanca.
+        _e, cobertos_nenhum, _t = contexto._cobertura("mongolia capital", self.ITENS)
+        _e, cobertos_metade, _t = contexto._cobertura("adquirente revogacao", self.ITENS)
+        self.assertEqual(0, cobertos_nenhum)
+        self.assertEqual(1, cobertos_metade)
+
+    def test_termo_so_no_caminho_nao_conta_como_coberto(self) -> None:
+        # Mede sobre o trecho, como `avaliacao` ja faz: termo que so aparece no nome
+        # do arquivo nao e algo que o agente possa citar.
+        self.assertEqual("parcial", self._estado("portal-nacional"))
+
+    def test_pergunta_sem_termo_relevante_nao_confirma(self) -> None:
+        self.assertEqual("parcial", self._estado("de o a"))
+
+    def test_schema_publicado_admite_os_tres_estados(self) -> None:
+        # O schema e servido como `outputSchema` da ferramenta MCP: emitir `parcial`
+        # sem declara-lo faria o servidor violar o proprio contrato anunciado.
+        enum = contexto.schema_contexto()["properties"]["cobertura"]["enum"]
+        self.assertEqual({"confirmada", "parcial", "ausente"}, set(enum))
 
 
 class RanqueamentoPorPalavraTest(unittest.TestCase):

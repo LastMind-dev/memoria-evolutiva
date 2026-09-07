@@ -178,6 +178,36 @@ def _pontuacao(pergunta: str, texto: str) -> float:
     return _pontuacao_preparada(_preparar_pergunta(pergunta), texto)
 
 
+def _cobertura(pergunta: str, itens: list[dict]) -> tuple[str, int, int]:
+    """Quanto da pergunta o material entregue de fato cobre.
+
+    O campo se chama cobertura e era decidido por "devolvi alguma linha?": uma
+    pergunta sem relacao nenhuma com o corpus saia `confirmada`, igual a pergunta
+    certa, e quem consome o envelope confiando nesse campo — que e o proposito dele
+    — tratava ruido como fundamentado. Passa a medir o que o nome diz, no mesmo
+    vocabulario de tres estados que o `frescor` ja usa.
+
+    Mede sobre o `trecho` apenas, e nao sobre caminho ou identificador: e a mesma
+    escolha que `avaliacao` ja faz para `cobertura_resposta`, e pela mesma razao —
+    termo que so aparece num nome de arquivo nao e algo que o agente possa citar.
+
+    Devolve tambem quantos termos foram cobertos, porque zero coberto e a patologia
+    que motivou a mudanca e le identico a "tres de quatro" se so o estado sair.
+    """
+    if not itens:
+        return "ausente", 0, 0
+    _normalizada, _unicos, padroes, _frase = _preparar_pergunta(pergunta)
+    if not padroes:
+        # Pergunta sem termo relevante nao tem o que cobrir.
+        return "parcial", 0, 0
+    material = _normalizar_fonte(
+        " ".join(str(item.get("trecho") or "") for item in itens)
+    )
+    cobertos = sum(1 for padrao in padroes if padrao.search(material))
+    estado = "confirmada" if cobertos == len(padroes) else "parcial"
+    return estado, cobertos, len(padroes)
+
+
 def _pontuacao_caminho(
     pergunta: str, caminho: str,
     preparada: tuple | None = None,
@@ -732,6 +762,14 @@ def construir(pergunta: object, perfil: object, max_tokens: int | None = None,
             "Cobertura ausente: nenhuma fonte atual, permitida e no escopo respondeu à pergunta."
         )
 
+    cobertura, termos_cobertos, termos_da_pergunta = _cobertura(
+        pergunta, [*saida_fontes, *saida_codigo]
+    )
+    if termos_da_pergunta and not termos_cobertos:
+        avisos.append(
+            "Nenhum termo da pergunta aparece no material entregue; "
+            "as fontes vieram por proximidade, não por correspondência."
+        )
     estrategias = sorted({
         estrategia
         for item in [*saida_fontes, *saida_codigo]
@@ -743,7 +781,7 @@ def construir(pergunta: object, perfil: object, max_tokens: int | None = None,
         "pergunta": pergunta,
         "perfil": perfil,
         "escopo": {"produto": produto_escopo, "tenant": tenant_escopo},
-        "cobertura": "confirmada" if saida_fontes or saida_codigo else "ausente",
+        "cobertura": cobertura,
         "frescor": "confirmado" if semantico_fresco and grafo_fresco else "parcial",
         "orcamento_tokens": orcamento,
         "tokens_estimados": consumidos,

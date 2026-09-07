@@ -92,7 +92,9 @@ nunca faz bind em `0.0.0.0`. Defina `MEMORIA_CONTEXTO_TOKEN` para exigir
 - Hindsight ou Graphify ativo, mas defasado/indisponível: resposta fica `parcial` e traz
   aviso; o provedor não confirmado não contribui;
 - provedor explicitamente desativado: a busca local continua, com aviso;
-- nenhuma fonte permitida: `cobertura: ausente`, lista vazia e aviso, nunca resposta inventada.
+- nenhuma fonte permitida: `cobertura: ausente`, lista vazia e aviso, nunca resposta inventada;
+- fontes entregues que não cobrem todos os termos da pergunta: `cobertura: parcial`;
+- todos os termos da pergunta presentes no material entregue: `cobertura: confirmada`.
 
 Classificação, audiência, isolamento e redaction estão especificados em
 `SEGURANCA-MEMORIA.md`. O gateway filtra o manifesto antes de entregar resultados; o

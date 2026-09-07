@@ -27,7 +27,8 @@
         "tenant": { "$ref": "#/$defs/escopo" }
       }
     },
-    "cobertura": { "enum": ["confirmada", "ausente"] },
+    "cobertura": { "enum": ["confirmada", "parcial",
+          "ausente"] },
     "frescor": { "enum": ["confirmado", "parcial"] },
     "orcamento_tokens": { "type": "integer", "minimum": 64 },
     "tokens_estimados": { "type": "integer", "minimum": 0 },
