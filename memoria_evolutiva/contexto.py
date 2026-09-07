@@ -114,28 +114,64 @@ def _tokens(texto: str) -> list[str]:
     return [t for t in _normalizar(texto).split() if len(t) > 1]
 
 
-def _preparar_pergunta(pergunta: str) -> tuple[str, frozenset[str]]:
+# Fronteira de palavra para o alfabeto que `_normalizar_bruto` produz. `\\b` nao
+# serve: ele trata `_` como caractere de palavra, e o alfabeto aqui mantem `_ . / -`
+# dentro dos tokens. Com esta forma, `id` nao casa dentro de `identidade`, mas
+# `token` continua casando em `token.md` — que e a correspondencia que interessa.
+_ANTES = "(?<![a-z0-9])"
+_DEPOIS = "(?![a-z0-9])"
+
+
+@lru_cache(maxsize=4096)
+def _padrao_termo(termo: str) -> "re.Pattern[str]":
+    return re.compile(_ANTES + re.escape(termo) + _DEPOIS)
+
+
+@lru_cache(maxsize=4096)
+def _padrao_prefixo(stem: str) -> "re.Pattern[str]":
+    """Fronteira so no inicio: os stems de `CONCEITOS_CAMINHO` sao prefixos.
+
+    `busc` precisa alcancar `buscar` e `busca`; fechar a fronteira no fim mataria o
+    grupo inteiro. O inicio continua guardado para o stem nao casar no meio de outra
+    palavra.
+    """
+    return re.compile(_ANTES + re.escape(stem))
+
+
+def _preparar_pergunta(pergunta: str) -> tuple:
+    normalizada = _normalizar(pergunta)
     consulta = _tokens(pergunta)
     if not consulta:
-        return _normalizar(pergunta), frozenset()
+        return normalizada, frozenset(), (), None
     relevantes = [token for token in consulta if token not in STOPWORDS_BUSCA]
-    consulta = relevantes or consulta
-    return _normalizar(pergunta), frozenset(consulta)
+    # Sem `relevantes`, a consulta era inteira de stopwords e o fallback devolvia
+    # tudo — foi assim que `de` marcou o teto da escala. Consulta sem termo
+    # relevante nao tem o que pontuar.
+    if not relevantes:
+        return normalizada, frozenset(), (), None
+    unicos = frozenset(relevantes)
+    padroes = tuple(_padrao_termo(t) for t in sorted(unicos))
+    # So ha bonus de frase quando existe frase: para consulta de um termo o
+    # bonus mede o mesmo que a presenca e conta duas vezes, e uma palavra solta
+    # passava a superar por 3x qualquer pergunta bem formada.
+    frase = _padrao_termo(normalizada) if normalizada and len(unicos) > 1 else None
+    return normalizada, unicos, padroes, frase
 
 
-def _pontuacao_preparada(
-    preparada: tuple[str, frozenset[str]], texto: str,
-) -> float:
-    pergunta_normalizada, unicos = preparada
+def _pontuacao_preparada(preparada: tuple, texto: str) -> float:
+    _pergunta_normalizada, unicos, padroes, frase = preparada
     if not unicos:
         return 0.0
     normalizado = _normalizar_fonte(texto)
-    presentes = sum(1 for token in unicos if token in normalizado)
+    achados = [p.findall(normalizado) for p in padroes]
+    presentes = sum(1 for a in achados if a)
+    if not presentes:
+        return 0.0
     # A consulta também pode vir de um chunk semântico inteiro. Sem normalização, cada
     # termo adicional aumenta o score e um documento longo domina uma pergunta curta.
-    frequencia = sum(min(normalizado.count(token), 3) for token in unicos) / len(unicos)
-    frase = 6.0 if pergunta_normalizada in normalizado else 0.0
-    return frase + 4.0 * presentes / len(unicos) + 0.25 * frequencia
+    frequencia = sum(min(len(a), 3) for a in achados) / len(padroes)
+    bonus_frase = 6.0 if frase is not None and frase.search(normalizado) else 0.0
+    return bonus_frase + 4.0 * presentes / len(padroes) + 0.25 * frequencia
 
 
 def _pontuacao(pergunta: str, texto: str) -> float:
@@ -144,20 +180,23 @@ def _pontuacao(pergunta: str, texto: str) -> float:
 
 def _pontuacao_caminho(
     pergunta: str, caminho: str,
-    preparada: tuple[str, frozenset[str]] | None = None,
+    preparada: tuple | None = None,
 ) -> float:
     consulta = (preparada or _preparar_pergunta(pergunta))[1]
     normalizado = _normalizar_fonte(caminho)
     total = 0.0
     for token in consulta:
-        variantes = {token}
+        # Mesma fronteira do ranqueamento de texto, senao `id` volta a pontuar em
+        # `identidade.md` — e agora custa mais caro em termos relativos, porque a
+        # escala do texto caiu de 10,75 para 4,75 numa consulta de um termo.
+        padroes = (_padrao_termo(token),)
         peso = 1.0
         for grupo, peso_grupo in CONCEITOS_CAMINHO:
             if any(token.startswith(stem) for stem in grupo):
-                variantes = grupo
+                padroes = tuple(_padrao_prefixo(stem) for stem in sorted(grupo))
                 peso = peso_grupo
                 break
-        if any(variante in normalizado for variante in variantes):
+        if any(padrao.search(normalizado) for padrao in padroes):
             total += 2.0 * peso
     return total
 
@@ -322,7 +361,7 @@ def _descricao_no(no: dict) -> str:
 
 def _melhor_linha(
     linhas: list[str] | tuple[str, ...], pergunta: str,
-    preparada: tuple[str, frozenset[str]] | None = None,
+    preparada: tuple | None = None,
 ) -> tuple[int, float]:
     consulta = preparada or _preparar_pergunta(pergunta)
     melhor = (1, 0.0)

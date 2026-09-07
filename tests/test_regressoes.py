@@ -3032,6 +3032,82 @@ class CicloAutonomoTest(unittest.TestCase):
         self.assertIn("motivo original", str(capturado.exception))
 
 
+class RanqueamentoPorPalavraTest(unittest.TestCase):
+    """O casamento era por substring, e o bonus de frase premiava termo solto."""
+
+    # Sem `id` solto, de proposito: o teste de fronteira precisa de um alvo onde
+    # `id` SO exista dentro de outra palavra, senao ele mede outra coisa.
+    ALVO = (
+        "a identidade de o considerado e valida; "
+        "ver docs/politicas/token.md e o adquirente obrigatorio no cindop"
+    )
+
+    def _pontuar(self, pergunta: str) -> float:
+        return contexto._pontuacao_preparada(
+            contexto._preparar_pergunta(pergunta), self.ALVO
+        )
+
+    def test_termo_nao_casa_dentro_de_outra_palavra(self) -> None:
+        # `id` casava em `identidade`; `valid` casava em `valida`.
+        self.assertEqual(0.0, self._pontuar("id"))
+        self.assertEqual(0.0, self._pontuar("valid"))
+
+    def test_termo_casa_atravessando_pontuacao_do_alfabeto_normalizado(self) -> None:
+        # A fronteira e "nao alfanumerico", e nao `\b`: o normalizador mantem
+        # `_ . / -` dentro dos tokens, entao `token` precisa achar `token.md`.
+        self.assertGreater(self._pontuar("token"), 0.0)
+        self.assertGreater(self._pontuar("identidade"), 0.0)
+
+    def test_consulta_so_de_stopwords_nao_pontua(self) -> None:
+        # Havia fallback: sem termo relevante, a consulta original voltava inteira,
+        # e `de` alcancava o teto da escala.
+        for vazia in ("de", "a de o", "que para com"):
+            self.assertEqual(0.0, self._pontuar(vazia), vazia)
+
+    def test_termo_unico_nao_ganha_bonus_de_frase(self) -> None:
+        # Para um termo, "a frase aparece" e "o termo aparece" sao a mesma medida:
+        # contava duas vezes e uma palavra solta superava por 3x uma pergunta
+        # bem formada. O teto de um termo passa a ser presenca + frequencia.
+        self.assertLess(self._pontuar("adquirente"), 6.0)
+
+    def test_caminho_nao_pontua_termo_dentro_de_outra_palavra(self) -> None:
+        # O nome do arquivo tinha o mesmo casamento por substring do texto, e pesa
+        # mais depois desta mudanca: a escala de um termo caiu de 10,75 para 4,75,
+        # entao 2,0 espurios viraram fracao maior do total.
+        self.assertEqual(
+            0.0, contexto._pontuacao_caminho("id", "docs/politicas/identidade.md")
+        )
+        self.assertEqual(
+            0.0, contexto._pontuacao_caminho("valid", "src/validacao/Valida.php")
+        )
+
+    def test_caminho_ainda_pontua_o_arquivo_com_o_termo(self) -> None:
+        self.assertGreater(
+            contexto._pontuacao_caminho("token", "docs/politicas/token.md"), 0.0
+        )
+
+    def test_conceitos_de_caminho_continuam_casando_por_prefixo(self) -> None:
+        # Os stems de CONCEITOS_CAMINHO sao prefixos de proposito: `busc` precisa
+        # alcancar `busca_cliente`. Fechar a fronteira no fim mataria os grupos,
+        # inclusive o cruzamento entre idiomas.
+        self.assertGreater(
+            contexto._pontuacao_caminho("buscar", "src/busca_cliente.php"), 0.0
+        )
+        self.assertGreater(
+            contexto._pontuacao_caminho("salvar", "src/persistencia.php"), 0.0
+        )
+        self.assertGreater(
+            contexto._pontuacao_caminho("pesquisar", "src/find_all.php"), 0.0
+        )
+
+    def test_frase_de_varios_termos_ainda_ganha_o_bonus(self) -> None:
+        # Aqui o bonus e informacao de verdade: os termos aparecem NA ORDEM.
+        junta = self._pontuar("adquirente obrigatorio")
+        separados = self._pontuar("adquirente cindop")
+        self.assertGreater(junta, 6.0)
+        self.assertGreater(junta, separados)
+
+
 class MarcadorNaoPersisteCredencialTest(unittest.TestCase):
     """O marcador e um arquivo versionado e commitado; query nele vira segredo em git."""
 
