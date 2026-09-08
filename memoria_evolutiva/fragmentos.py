@@ -15,7 +15,8 @@ import unicodedata
 from pathlib import Path
 
 from . import indice, seguranca
-from .lib import barras, config, frontmatter, raiz, relativo, sha256_canonico, titulo
+from .lib import (TIPO_INDETERMINADO, STATUS_INDETERMINADO, barras, config,
+                  frontmatter, raiz, relativo, sha256_canonico, titulo)
 
 
 ALGORITMO = "markdown-secoes-v2-acl"
@@ -459,8 +460,8 @@ def _documento(rel: str, perfil: dict, usados: set[str]) -> tuple[dict, list[dic
         "source_sha256": _sha256(bruto),
         "doc_id": str(fm.get("id") or Path(rel).stem),
         "doc_titulo": str(fm.get("titulo") or fm.get("id") or Path(rel).stem),
-        "doc_tipo": str(fm.get("tipo") or "indeterminado"),
-        "doc_status": str(fm.get("status") or "indeterminado"),
+        "doc_tipo": str(fm.get("tipo") or TIPO_INDETERMINADO),
+        "doc_status": str(fm.get("status") or STATUS_INDETERMINADO),
         **acesso,
     }
     if doc["doc_id"] == "ABERTO":

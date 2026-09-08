@@ -91,7 +91,16 @@
         "fontes_esperadas": { "$ref": "#/$defs/textos" },
         "fontes_proibidas": { "$ref": "#/$defs/textos" },
         "termos_esperados": { "$ref": "#/$defs/textos" },
-        "espera_sem_fonte": { "type": "boolean" }
+        "espera_sem_fonte": { "type": "boolean" },
+        "status_esperado": {
+          "description": "Status do vocabulario do projeto, ou `indeterminado`. Atencao: `indeterminado` e gravado tanto quando o autor escreve essa palavra quanto quando o documento nao declara status nenhum — os dois casos sao indistinguiveis aqui.",
+          "type": "array", "minItems": 1, "uniqueItems": true,
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "cobertura_esperada": {
+          "enum": ["confirmada", "parcial", "ausente"],
+          "description": "Prefira `confirmada`: melhorar a recuperacao so pode levar a cobertura nessa direcao. Afirmar `parcial` fixa o caso num estado intermediario e o deixa vermelho quando a recuperacao melhorar."
+        }
       },
       "allOf": [
         {
@@ -123,11 +132,22 @@
           "then": { "required": ["produto", "tenant"] }
         },
         {
+          "if": {
+            "required": ["espera_sem_fonte"],
+            "properties": {
+              "espera_sem_fonte": { "const": true },
+              "perfil": { "enum": ["atendimento", "operacao-assistida"] }
+            }
+          },
+          "then": { "properties": { "cobertura_esperada": false } }
+        },
+        {
           "if": { "properties": { "espera_sem_fonte": { "const": true } } },
           "then": {
             "properties": {
               "fontes_esperadas": { "maxItems": 0 },
-              "termos_esperados": { "maxItems": 0 }
+              "termos_esperados": { "maxItems": 0 },
+              "status_esperado": false
             }
           },
           "else": {

@@ -16,11 +16,17 @@ import unicodedata
 from pathlib import Path
 
 from . import contexto, fragmentos, seguranca
-from .lib import config, raiz, relativo, sha256_canonico, titulo
+from .lib import (STATUS_INDETERMINADO, config, raiz, relativo,
+                  sha256_canonico, titulo)
 
 
 SCHEMA = 1
 CATEGORIAS = {"engenharia", "atendimento", "automacao"}
+# `fragmentos` grava `indeterminado` quando o DOCUMENTO nao declara status: e
+# valor legitimo, e um corpus precisa poder afirma-lo. Fonte que chega SEM
+# `status` e outra coisa — viola o contrato do envelope, que o exige — e por
+# isso nao vira valor de status nenhum: ver `fontes_sem_status`.
+STATUS_SEM_FRONTMATTER = STATUS_INDETERMINADO
 METRICAS_MAIORES = (
     "hit_1", "hit_3", "cobertura_citacao", "cobertura_resposta", "negativos_ok",
 )
@@ -200,11 +206,53 @@ def _carregar_corpus() -> tuple[dict, str]:
         fontes = _validar_fontes(caso, "fontes_esperadas")
         _validar_fontes(caso, "fontes_proibidas")
         termos = _lista_texto(caso, "termos_esperados")
+        status_esperado = caso.get("status_esperado")
+        # `in caso` e nao `is not None`: `"status_esperado": null` era aceito
+        # calado aqui e recusado pelo schema publicado.
+        if "status_esperado" in caso:
+            # `_lista_texto` primeiro, como toda lista irma do corpus: recusa nao
+            # lista, item nao texto, texto em branco e DUPLICATA. Sem ele o schema
+            # do relatorio (`$defs/textos`, `uniqueItems`) prometia mais do que a
+            # carga exigia.
+            status_esperado = _lista_texto(caso, "status_esperado")
+            vocabulario = set(config().get("vocabulario", {}).get("status", []))
+            # Vocabulario vazio recusa tudo, e nao aceita tudo: em todo o resto
+            # deste modulo a falha e fechada.
+            aceitos = vocabulario | {STATUS_SEM_FRONTMATTER}
+            if (not status_esperado
+                    or not set(status_esperado) <= aceitos):
+                raise AvaliacaoErro(
+                    f"caso `{id_}`: `status_esperado` precisa ser lista não vazia "
+                    "de status do vocabulário do projeto, ou `indeterminado`"
+                )
+        cobertura_esperada = caso.get("cobertura_esperada")
+        if "cobertura_esperada" in caso and cobertura_esperada not in contexto.COBERTURAS:
+            raise AvaliacaoErro(
+                f"caso `{id_}`: `cobertura_esperada` precisa ser um de "
+                + ", ".join(contexto.COBERTURAS)
+            )
         sem_fonte = caso.get("espera_sem_fonte", False)
         if not isinstance(sem_fonte, bool):
             raise AvaliacaoErro(f"caso `{id_}`: `espera_sem_fonte` precisa ser booleano")
         if sem_fonte and (fontes or termos):
             raise AvaliacaoErro(f"caso negativo `{id_}` não pode exigir fonte ou termo")
+        if sem_fonte and "status_esperado" in caso:
+            # Caso negativo nao devolve fonte, logo nao ha status a conferir: a
+            # assercao seria silenciosamente inerte.
+            raise AvaliacaoErro(
+                f"caso negativo `{id_}` não pode exigir `status_esperado`"
+            )
+        if (sem_fonte and "cobertura_esperada" in caso
+                and not contexto.PERFIS[str(perfil)]["codigo"]):
+            # Espelho do caso acima, e pior: num perfil sem codigo o negativo
+            # perfeito nao tem item nenhum, e `_cobertura` devolve `ausente` por
+            # construcao. `ausente` e tautologia; qualquer outro valor trava o
+            # portao em vermelho para sempre, sem erro que explique. Onde o perfil
+            # le codigo a assercao volta a ter conteudo, e continua permitida.
+            raise AvaliacaoErro(
+                f"caso negativo `{id_}` em perfil sem código não pode exigir "
+                "`cobertura_esperada`: seria sempre `ausente`"
+            )
         if not sem_fonte and (not fontes or not termos):
             raise AvaliacaoErro(f"caso positivo `{id_}` precisa exigir fontes e termos")
         (negativos_por_categoria if sem_fonte else positivos_por_categoria).add(
@@ -268,13 +316,63 @@ def _executar_caso(caso: dict) -> dict:
     ))
     termos = caso.get("termos_esperados", [])
     termos_encontrados = [termo for termo in termos if _normalizar(termo) in texto]
+    # Proveniencia: o `status` que o envelope devolve para as fontes esperadas.
+    # Afere estrutura, e nao texto — depender de o ranqueamento trazer o trecho de
+    # cabecalho torna o teste refem do ranqueamento que ele deveria avaliar.
+    status_esperado = caso.get("status_esperado") or []
+    status_brutos = [
+        str(item.get("status") or "").strip()
+        for item in itens_fontes
+        if _fonte_base(item.get("source_uri")) in esperadas
+    ]
+    # `contexto-v2` exige `status` em toda fonte, entao uma fonte sem ele e defeito
+    # do produtor, e nao observacao sobre o documento. Marcar isso com um valor de
+    # status — um sentinela em texto — poria a violacao no mesmo espaco de nomes do
+    # `vocabulario`, que cada projeto edita a vontade: bastaria alguem adotar esse
+    # nome para a violacao voltar a passar por status valido, e para um documento
+    # valido passar por violacao. Campo proprio, colisao nenhuma.
+    #
+    # E sem o filtro de `esperadas`, de proposito: `status_das_fontes` afirma sobre
+    # as fontes que ESTE caso espera, mas isto e conferencia do contrato, e um
+    # indice corrompido nao pode ficar invisivel so porque nenhum caso do corpus
+    # aponta para o documento defeituoso.
+    # Lista, e nao booleano: quem le o portao precisa consertar um DOCUMENTO, e um
+    # `true` obrigava a cruzar `fontes_retornadas` de varios casos na mao para
+    # descobrir qual. Vazia quando esta tudo certo.
+    fontes_sem_status = sorted({
+        _fonte_base(item.get("source_uri")) or "(fonte sem caminho em `source_uri`)"
+        for item in itens_fontes
+        if not str(item.get("status") or "").strip()
+    })
+    status_das_fontes = sorted({bruto for bruto in status_brutos if bruto})
+    status_ok = (
+        not status_esperado
+        or all(s in status_esperado for s in status_das_fontes)
+    )
+    cobertura_esperada = caso.get("cobertura_esperada")
+    cobertura_envelope = envelope.get("cobertura")
+    cobertura_ok = cobertura_esperada is None or cobertura_envelope == cobertura_esperada
     cobertura_resposta = len(termos_encontrados) / len(termos) if termos else None
     if negativas:
-        ok = not fontes and not vazou
+        # Tambem aqui: sem isto um caso podia passar (`ok: True`) e ainda assim
+        # aparecer na linha de violacao do portao — portao vermelho nomeando um
+        # caso aprovado. Violacao de contrato reprova, e ponto.
+        ok = not fontes and not vazou and not fontes_sem_status and cobertura_ok
     else:
         ok = (
             hit_3 and len(citadas) == len(esperadas)
             and cobertura_resposta == 1.0 and not vazou
+            # Incondicional, e nao so quando o caso afirma proveniencia: fonte sem
+            # `status` viola o contrato que `contexto-v2` publica, e medir a
+            # violacao para depois ignora-la e o pior dos estados. Hoje e no-op —
+            # nenhum produtor consegue emiti-la —, e o que compra e um indice
+            # corrompido virando portao vermelho em vez de um `true` que ninguem le.
+            and not fontes_sem_status
+            # `citadas == esperadas` com `esperadas` nao vazio garante que alguma
+            # fonte esperada voltou, logo `status_brutos` nao e vazio: ou ha status
+            # legivel, ou `fontes_sem_status` acima. E por isso que `status_ok` nao
+            # carrega guarda para conjunto vazio.
+            and status_ok and cobertura_ok
         )
     return {
         "id": caso["id"],
@@ -297,6 +395,11 @@ def _executar_caso(caso: dict) -> dict:
             round(cobertura_resposta, 6) if cobertura_resposta is not None else None
         ),
         "sem_fonte": not fontes,
+        "status_esperado": status_esperado,
+        "status_das_fontes": status_das_fontes,
+        "fontes_sem_status": fontes_sem_status,
+        "cobertura_esperada": cobertura_esperada,
+        "cobertura_envelope": cobertura_envelope,
         "ok": ok,
     }
 
@@ -537,6 +640,19 @@ def _aplicar_gate(relatorio: dict, baseline: dict | None) -> dict:
     reprovados = [caso["id"] for caso in relatorio["casos"] if not caso["ok"]]
     if reprovados:
         erros.append("casos reprovados: " + ", ".join(reprovados))
+    # Defeito de produtor e regressao de recuperacao pedem acoes opostas — corrigir
+    # o indice ou reajustar o ranqueamento — e "casos reprovados" nao distingue as
+    # duas. Sem esta linha a causa so aparece abrindo o relatorio.
+    sem_status = sorted({
+        uri
+        for caso in relatorio["casos"]
+        for uri in caso.get("fontes_sem_status") or []
+    })
+    if sem_status:
+        erros.append(
+            "fontes sem `status` (índice desatualizado, não regressão de "
+            "recuperação): " + ", ".join(sem_status)
+        )
 
     drift = {
         "baseline_sha256": None,

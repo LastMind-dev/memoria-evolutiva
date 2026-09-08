@@ -17,8 +17,8 @@ from pathlib import Path
 from threading import BoundedSemaphore, Lock
 
 from . import __version__, indice, seguranca
-from .lib import (commit_atual, config, endpoint_bruto, frontmatter, raiz,
-                  url_sem_query)
+from .lib import (STATUS_INDETERMINADO, TIPO_INDETERMINADO, commit_atual,
+                  config, endpoint_bruto, frontmatter, raiz, url_sem_query)
 
 
 class HindsightErro(RuntimeError):
@@ -240,8 +240,8 @@ def _item(rel: str, conteudo: str) -> dict:
         "source_uri": rel,
         "source_commit": commit or "",
         "doc_id": str(fm.get("id") or ""),
-        "doc_tipo": str(fm.get("tipo") or ""),
-        "doc_status": str(fm.get("status") or ""),
+        "doc_tipo": str(fm.get("tipo") or TIPO_INDETERMINADO),
+        "doc_status": str(fm.get("status") or STATUS_INDETERMINADO),
         "projeto": str(config()["projeto"]),
         "classificacao": str(acesso["classificacao"]),
         # A API oficial tipa metadata como map[string, string]. Preserve listas em

@@ -36,6 +36,13 @@ def barras(caminho: str) -> str:
     return caminho.replace("\\", "/")
 
 
+# Status gravado quando o DOCUMENTO nao declara um. Mora aqui porque tem dois
+# produtores (`fragmentos` e `hindsight`) e um consumidor que os compara
+# (`avaliacao`): tres literais soltos foi como um deles ficou divergente.
+STATUS_INDETERMINADO = "indeterminado"
+# Mesmo valor, outro campo e outro significado: separados de proposito, para
+# que mudar o vocabulario de `tipo` nao mexa calado no de `status`.
+TIPO_INDETERMINADO = "indeterminado"
 ENDPOINT_HINDSIGHT_PADRAO = "http://127.0.0.1:8888"
 
 

@@ -160,6 +160,11 @@
         "cobertura_citacao": { "$ref": "#/$defs/fracao_nula" },
         "cobertura_resposta": { "$ref": "#/$defs/fracao_nula" },
         "sem_fonte": { "type": "boolean" },
+        "status_esperado": { "$ref": "#/$defs/textos" },
+        "status_das_fontes": { "$ref": "#/$defs/textos" },
+        "fontes_sem_status": { "$ref": "#/$defs/textos" },
+        "cobertura_esperada": { "type": ["string", "null"] },
+        "cobertura_envelope": { "type": ["string", "null"] },
         "ok": { "type": "boolean" }
       }
     },

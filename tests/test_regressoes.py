@@ -17,13 +17,14 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from unittest import mock
 
+from memoria_evolutiva import fragmentos
 from memoria_evolutiva.fragmentos import _cabecalhos, _partir_texto, consultaveis
 from memoria_evolutiva import __version__
 from memoria_evolutiva.lib import (bytes_canonicos, hash_do_conteudo,
                                    sha256_canonico, url_sem_query)
 from memoria_evolutiva import (
-    agendador, autoteste, ciclo, contexto, executor, grafo, hindsight, indice,
-    instalar, lib,
+    agendador, autoteste, avaliacao, ciclo, contexto, executor, grafo,
+    hindsight, indice, instalar, lib,
     provisao, seguranca, skill, verificacao,
 )
 
@@ -1676,6 +1677,74 @@ class CliEmProjetoTemporario(unittest.TestCase):
         self.assertNotIn("Traceback", resultado.stdout + resultado.stderr)
 
 
+    # O caminho do documento sem `status`, que nenhuma fixture exercitava.
+    # Substitui um teste que comparava o TEXTO das duas linhas produtoras: ele
+    # afirmava que estavam escritas igual e ficou verde enquanto `fragmentos`
+    # referenciava uma constante que nunca importou. `or` faz curto-circuito,
+    # entao so um documento realmente sem status avalia o operando da direita.
+    # O teste anterior afirmava que os dois modulos importam a mesma constante —
+    # o que nao prova que a USAM: reverter o uso no `hindsight` passava verde.
+    # Este chama o produtor de verdade, no projeto de verdade.
+    def test_hindsight_grava_indeterminado_quando_o_documento_nao_declara(self) -> None:
+        # Em subprocesso, e nao com `os.chdir` em processo: `raiz()` resolve o
+        # projeto por `MEMORIA_PROJETO_RAIZ` ou subindo do cwd, e na suite inteira
+        # esse estado chega contaminado por quem rodou antes — o teste passava
+        # sozinho e quebrava no conjunto. E o mesmo isolamento que `self.cli` usa.
+        conteudo = (
+            "---\n"
+            "id: SEM-META\n"
+            "titulo: Documento sem tipo nem status\n"
+            "classificacao: interno\n"
+            "---\n\n"
+            "## Contexto\n\nNem `tipo` nem `status` no frontmatter.\n"
+        )
+        programa = (
+            "import json, sys\n"
+            "from memoria_evolutiva import hindsight\n"
+            "item = hindsight._item('docs/sem-meta.md', sys.stdin.read())\n"
+            "print(json.dumps(item['metadata']))\n"
+        )
+        env = os.environ.copy()
+        env["PYTHONPATH"] = str(REPOSITORIO) + os.pathsep + env.get("PYTHONPATH", "")
+        env["PYTHONUTF8"] = "1"
+        env["MEMORIA_PROJETO_RAIZ"] = str(self.projeto)
+        r = subprocess.run(
+            [sys.executable, "-c", programa], cwd=self.projeto, env=env,
+            input=conteudo, capture_output=True, text=True, encoding="utf-8",
+            timeout=120,
+        )
+        self.assertEqual(0, r.returncode, r.stdout + r.stderr)
+        metadata = json.loads(r.stdout)
+
+        self.assertEqual(lib.STATUS_INDETERMINADO, metadata["doc_status"])
+        self.assertEqual(lib.TIPO_INDETERMINADO, metadata["doc_tipo"])
+
+    def test_indexar_documento_sem_status_nao_quebra_e_grava_indeterminado(self) -> None:
+        projeto_md = self.projeto / "docs/PROJETO.md"
+        original = projeto_md.read_text(encoding="utf-8")
+        sem_status = "\n".join(
+            linha for linha in original.splitlines()
+            if not linha.startswith("status:")
+        ) + "\n"
+        self.assertNotEqual(original, sem_status, "a fixture já não declarava status")
+        projeto_md.write_text(sem_status, encoding="utf-8")
+
+        r = self.cli("fragmentos", "gerar")
+        self.assertEqual(0, r.returncode, r.stdout + r.stderr)
+
+        manifesto = json.loads(
+            (self.projeto / "docs/gerado/manifesto-fragmentos-v2.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        nossos = [
+            f for f in manifesto["fragmentos"]
+            if f["source_uri"].startswith("docs/PROJETO.md")
+        ]
+        self.assertTrue(nossos, "o documento sem status nem chegou ao índice")
+        for fragmento in nossos:
+            self.assertEqual(lib.STATUS_INDETERMINADO, fragmento["doc_status"])
+
 class HashDoConteudoTest(unittest.TestCase):
     def test_identidade_textual_normaliza_lf_crlf_sem_relaxar_binario(self) -> None:
         lf = b"linha um\nlinha dois\n"
@@ -3054,6 +3123,783 @@ class CicloAutonomoTest(unittest.TestCase):
         with self.assertRaises(Imutavel) as capturado:
             ciclo._silencioso(levanta)
         self.assertIn("motivo original", str(capturado.exception))
+
+
+class CarregamentoDeProvenienciaTest(unittest.TestCase):
+    """O corpus e canonico: assercao que nao pode valer tem de ser recusada na carga.
+
+    Um caso invalido que passa na carga nao vira erro — vira metrica verde. Estes
+    testes cobrem os dois jeitos de a assercao ser vazia: a que nunca e conferida
+    (caso negativo) e a que nunca poderia bater (vocabulario ausente).
+    """
+
+    def _corpus(self, extra: dict) -> dict:
+        # Minimo que a carga aceita: positivo de engenharia e de automacao, negativo
+        # de atendimento. O caso sob teste vem primeiro para que o erro dele seja o
+        # que aparece, e nao uma invariante de conjunto mais adiante.
+        comum = {
+            "pergunta": "p", "resposta_esperada": "r",
+            "produto": "x", "tenant": "y",
+        }
+        return {
+            "schema": 1,
+            "projeto": "proj",
+            "casos": [
+                dict(comum, id="sob-teste", **extra),
+                dict(comum, id="eng", categoria="engenharia",
+                     perfil="engenharia-leitura", fontes_esperadas=["docs/a.md"],
+                     termos_esperados=["t"]),
+                dict(comum, id="aut", categoria="automacao",
+                     perfil="automacao-codigo", fontes_esperadas=["docs/b.md"],
+                     termos_esperados=["t"]),
+                dict(comum, id="ate", categoria="atendimento",
+                     perfil="atendimento", espera_sem_fonte=True),
+            ],
+        }
+
+    @contextlib.contextmanager
+    def _carga(self, extra: dict, vocabulario: list[str]):
+        with tempfile.TemporaryDirectory() as tmp:
+            caminho = Path(tmp) / "casos.json"
+            caminho.write_text(
+                json.dumps(self._corpus(extra), ensure_ascii=False), encoding="utf-8"
+            )
+            with (
+                mock.patch.object(avaliacao, "corpus_path", return_value=caminho),
+                mock.patch.object(
+                    avaliacao, "config",
+                    return_value={"projeto": "proj",
+                                  "vocabulario": {"status": vocabulario}},
+                ),
+            ):
+                yield
+
+    NEGATIVO = {
+        "categoria": "atendimento", "perfil": "atendimento",
+        "espera_sem_fonte": True,
+    }
+    POSITIVO = {
+        "categoria": "engenharia", "perfil": "engenharia-leitura",
+        "fontes_esperadas": ["docs/a.md"], "termos_esperados": ["t"],
+    }
+    VOCABULARIO = ["rascunho", "verificado", "superado"]
+
+    def test_caso_negativo_nao_pode_declarar_status_esperado(self) -> None:
+        # Caso negativo espera ZERO fontes, logo `status_das_fontes` vem vazio e
+        # `status_ok` nem entra no `ok` dele. A assercao seria escrita, versionada e
+        # revisada — e nunca conferida.
+        with self._carga(dict(self.NEGATIVO, status_esperado=["rascunho"]),
+                         self.VOCABULARIO):
+            with self.assertRaises(avaliacao.AvaliacaoErro) as erro:
+                avaliacao._carregar_corpus()
+        self.assertIn("status_esperado", str(erro.exception))
+
+    def test_caso_negativo_sem_o_campo_continua_valido(self) -> None:
+        with self._carga(dict(self.NEGATIVO), self.VOCABULARIO):
+            dados, _sha = avaliacao._carregar_corpus()
+        self.assertEqual(4, len(dados["casos"]))
+
+    def test_indeterminado_e_nomeavel_mesmo_fora_do_vocabulario(self) -> None:
+        # `vocabulario.status` descreve o que um AUTOR pode escrever no frontmatter;
+        # `indeterminado` e o que o extrator grava quando ele nao escreveu nada. Sem
+        # esta uniao o corpus nao consegue afirmar o estado mais comum da base.
+        self.assertNotIn(avaliacao.STATUS_SEM_FRONTMATTER, self.VOCABULARIO)
+        with self._carga(dict(self.POSITIVO, status_esperado=["indeterminado"]),
+                         self.VOCABULARIO):
+            dados, _sha = avaliacao._carregar_corpus()
+        self.assertEqual(["indeterminado"], dados["casos"][0]["status_esperado"])
+
+    def test_status_esperado_duplicado_e_recusado(self) -> None:
+        # O relatorio declara `$defs/textos` (`uniqueItems`), e o schema do corpus
+        # tambem — mas nenhum dos dois e lido em execucao. Sem esta recusa a carga
+        # aceitava a duplicata e `memoria avaliar` gravava um relatorio que viola o
+        # proprio contrato que publica. Toda lista irma do corpus ja passa por
+        # `_lista_texto`; esta era a unica excecao.
+        for invalido in (["rascunho", "rascunho"], ["rascunho", "   "], ["rascunho", 3]):
+            with self.subTest(invalido=invalido):
+                with self._carga(dict(self.POSITIVO, status_esperado=invalido),
+                                 self.VOCABULARIO):
+                    with self.assertRaises(avaliacao.AvaliacaoErro):
+                        avaliacao._carregar_corpus()
+
+    def test_status_fora_do_vocabulario_continua_recusado(self) -> None:
+        with self._carga(dict(self.POSITIVO, status_esperado=["obsoleto"]),
+                         self.VOCABULARIO):
+            with self.assertRaises(avaliacao.AvaliacaoErro):
+                avaliacao._carregar_corpus()
+
+    def test_status_esperado_null_e_recusado_como_o_schema_recusa(self) -> None:
+        # `caso.get(...)` nao separa ausente de `null`, entao `"status_esperado":
+        # null` passava calado aqui e era recusado pelo schema publicado. Contrato
+        # que aceita num lugar e recusa no outro e pior que qualquer um dos dois.
+        with self._carga(dict(self.POSITIVO, status_esperado=None),
+                         self.VOCABULARIO):
+            with self.assertRaises(avaliacao.AvaliacaoErro):
+                avaliacao._carregar_corpus()
+
+    def test_cobertura_esperada_no_negativo_sem_codigo_e_recusada(self) -> None:
+        # Espelho da regra do `status_esperado`, e mais perigosa: num perfil sem
+        # codigo o negativo perfeito nao tem item nenhum e `_cobertura` devolve
+        # `ausente` por construcao. Pedir outra coisa trava o portao em vermelho
+        # para sempre — `min_negativos_ok` e 1.0 — sem erro que explique por que.
+        self.assertFalse(contexto.PERFIS["atendimento"]["codigo"])
+        with self._carga(dict(self.NEGATIVO, cobertura_esperada="parcial"),
+                         self.VOCABULARIO):
+            with self.assertRaises(avaliacao.AvaliacaoErro) as erro:
+                avaliacao._carregar_corpus()
+        self.assertIn("cobertura_esperada", str(erro.exception))
+
+    def test_cobertura_esperada_no_negativo_com_codigo_continua_valida(self) -> None:
+        # A regra e sobre o perfil, e nao sobre o caso ser negativo: onde o perfil
+        # le codigo, um negativo pode ter cobertura diferente de `ausente` e a
+        # assercao volta a ter conteudo. Recusar os dois seria simples e errado.
+        self.assertTrue(contexto.PERFIS["engenharia-leitura"]["codigo"])
+        negativo_com_codigo = {
+            "categoria": "engenharia", "perfil": "engenharia-leitura",
+            "espera_sem_fonte": True, "cobertura_esperada": "ausente",
+        }
+        with self._carga(negativo_com_codigo, self.VOCABULARIO):
+            dados, _sha = avaliacao._carregar_corpus()
+        self.assertEqual("ausente", dados["casos"][0]["cobertura_esperada"])
+
+    def test_vocabulario_com_o_nome_do_sentinela_nao_muda_nada(self) -> None:
+        # HIGH-1 da revisao: enquanto a violacao de contrato fosse um VALOR de
+        # status, ela dividia espaco com o `vocabulario`, que cada projeto edita.
+        # Bastava adotar esse nome para a violacao virar status valido — e para um
+        # documento valido virar violacao. O teste anterior aqui passava
+        # `indeterminado` no lugar do sentinela e por isso nao media isso.
+        for nome in ("sem-status", "indeterminado", "qualquer-coisa"):
+            with self.subTest(nome=nome):
+                with self._carga(dict(self.POSITIVO, status_esperado=[nome]),
+                                 self.VOCABULARIO + [nome]):
+                    dados, _sha = avaliacao._carregar_corpus()
+                self.assertEqual([nome], dados["casos"][0]["status_esperado"])
+
+    def test_vocabulario_vazio_recusa_em_vez_de_aceitar_tudo(self) -> None:
+        # A guarda era `vocabulario and not set(...) <= vocabulario`: projeto sem
+        # vocabulario configurado passava a aceitar QUALQUER status. Falha aberta
+        # exatamente onde o resto do modulo falha fechada.
+        with self._carga(dict(self.POSITIVO, status_esperado=["rascunho"]), []):
+            with self.assertRaises(avaliacao.AvaliacaoErro):
+                avaliacao._carregar_corpus()
+
+
+class ProvenienciaNoCorpusTest(unittest.TestCase):
+    """Um caso podia exigir que a fonte viesse, nunca que ela fosse proposta.
+
+    Testar proveniencia por `termos_esperados` amarra o teste ao ranqueamento que
+    ele deveria avaliar: se o trecho de cabecalho nao for entregue, o caso reprova
+    mesmo com o documento certo no topo. Estes campos aferem o `status` e a
+    `cobertura` que o envelope ja devolve.
+    """
+
+    ENVELOPE = {
+        "cobertura": "parcial",
+        "fontes": [
+            {"source_uri": "docs/a.md#s1", "trecho": "o adquirente obrigatorio",
+             "status": "rascunho"},
+        ],
+    }
+    BASE = {
+        "id": "x", "categoria": "engenharia", "perfil": "engenharia-leitura",
+        "pergunta": "p", "resposta_esperada": "r",
+        "fontes_esperadas": ["docs/a.md"], "fontes_proibidas": [],
+        "termos_esperados": ["adquirente"], "espera_sem_fonte": False,
+    }
+
+    def _executar(self, **extra):
+        with mock.patch.object(
+            avaliacao.contexto, "construir", return_value=self.ENVELOPE
+        ):
+            return avaliacao._executar_caso(dict(self.BASE, **extra))
+
+    def test_caso_sem_os_campos_novos_nao_muda(self) -> None:
+        # Corpus que nao declara proveniencia precisa continuar identico: a baseline
+        # guarda o conjunto de metricas, e mudar a forma dela forcaria rebaseline
+        # deliberado em todo projeto instalado.
+        r = self._executar()
+        self.assertTrue(r["ok"])
+        self.assertEqual([], r["status_esperado"])
+        self.assertIsNone(r["cobertura_esperada"])
+
+    def test_status_esperado_confere_com_o_envelope(self) -> None:
+        self.assertTrue(self._executar(status_esperado=["rascunho"])["ok"])
+        self.assertEqual(["rascunho"], self._executar()["status_das_fontes"])
+
+    def test_status_divergente_reprova_o_caso(self) -> None:
+        # O ponto do campo: afirmar que um FDD bloqueado e comportamento reprova.
+        r = self._executar(status_esperado=["verificado"])
+        self.assertFalse(r["ok"])
+
+    def test_uma_fonte_fora_do_status_ja_reprova(self) -> None:
+        # Com uma fonte so, `all` e `any` sao indistinguiveis e o teste nao mede nada:
+        # foi uma mutacao que revelou isso. Aqui a pergunta traz um FDD em rascunho e
+        # uma politica verificada; exigir que TUDO seja rascunho tem de reprovar,
+        # senao o caso afirmaria proveniencia que metade das fontes nao tem.
+        envelope = {
+            "cobertura": "confirmada",
+            "fontes": [
+                {"source_uri": "docs/a.md#s1", "trecho": "o adquirente obrigatorio",
+                 "status": "rascunho"},
+                {"source_uri": "docs/b.md#s1", "trecho": "o adquirente na politica",
+                 "status": "verificado"},
+            ],
+        }
+        caso = dict(
+            self.BASE,
+            fontes_esperadas=["docs/a.md", "docs/b.md"],
+            status_esperado=["rascunho"],
+        )
+        with mock.patch.object(avaliacao.contexto, "construir", return_value=envelope):
+            r = avaliacao._executar_caso(caso)
+
+        self.assertEqual(["rascunho", "verificado"], r["status_das_fontes"])
+        self.assertFalse(r["ok"])
+
+    def test_cobertura_esperada_confere_com_o_envelope(self) -> None:
+        self.assertTrue(self._executar(cobertura_esperada="parcial")["ok"])
+        self.assertFalse(self._executar(cobertura_esperada="confirmada")["ok"])
+
+    def test_status_ausente_e_status_indeterminado_nao_se_confundem(self) -> None:
+        # Sao duas coisas: `indeterminado` e o que `fragmentos` grava quando o
+        # DOCUMENTO nao declara status — observacao legitima, que um caso pode
+        # afirmar. Fonte que chega SEM `status` viola o contrato do envelope, que
+        # o exige. Cunhar `indeterminado` para as duas fazia a violacao passar por
+        # observacao e, pior, casar com um `status_esperado` que a nomeasse.
+        def envelope_com(status):
+            return {
+                "cobertura": "confirmada",
+                "fontes": [
+                    {"source_uri": "docs/a.md#s1", "trecho": "o adquirente",
+                     "status": status},
+                ],
+            }
+
+        with mock.patch.object(
+            avaliacao.contexto, "construir", return_value=envelope_com("indeterminado")
+        ):
+            declarado = avaliacao._executar_caso(
+                dict(self.BASE, status_esperado=["indeterminado"])
+            )
+        self.assertEqual(["indeterminado"], declarado["status_das_fontes"])
+        self.assertTrue(declarado["ok"])
+
+        with mock.patch.object(
+            avaliacao.contexto, "construir", return_value=envelope_com(None)
+        ):
+            ausente = avaliacao._executar_caso(
+                dict(self.BASE, status_esperado=["indeterminado"])
+            )
+        # A violacao nao aparece como status: some do conjunto e acende um campo
+        # proprio. Assim nenhum valor de `vocabulario` consegue imita-la.
+        self.assertEqual([], ausente["status_das_fontes"])
+        self.assertEqual(["docs/a.md"], ausente["fontes_sem_status"])
+        self.assertFalse(ausente["ok"])
+        self.assertEqual([], declarado["fontes_sem_status"])
+
+    def test_fonte_inesperada_no_envelope_nao_contamina_o_status(self) -> None:
+        # `status_esperado` afirma sobre as fontes que o caso ESPERA. O envelope
+        # costuma trazer mais que isso, e uma quarta fonte de ranqueamento nao pode
+        # reprovar uma assercao de proveniencia — vazamento e o que `fontes_proibidas`
+        # mede. Ate aqui toda fonte da fixture estava em `fontes_esperadas`, entao
+        # filtrar e nao filtrar davam o mesmo conjunto e o filtro nao era testado:
+        # foi a mutacao que removeu o filtro, e passou, que mostrou isso.
+        envelope = {
+            "cobertura": "confirmada",
+            "fontes": [
+                {"source_uri": "docs/a.md#s1", "trecho": "o adquirente obrigatorio",
+                 "status": "rascunho"},
+                {"source_uri": "docs/z.md#s1", "trecho": "o adquirente noutro lugar",
+                 "status": "verificado"},
+            ],
+        }
+        caso = dict(
+            self.BASE,
+            fontes_esperadas=["docs/a.md"],
+            status_esperado=["rascunho"],
+        )
+        with mock.patch.object(avaliacao.contexto, "construir", return_value=envelope):
+            r = avaliacao._executar_caso(caso)
+
+        self.assertEqual(["rascunho"], r["status_das_fontes"])
+        self.assertTrue(r["ok"])
+
+    def test_termo_so_da_fonte_inesperada_nao_conta_como_encontrado(self) -> None:
+        # Irmao do teste acima, para o outro filtro por `esperadas`: o texto em que
+        # `termos_esperados` e procurado tambem so olha as fontes esperadas. Sem
+        # isso, um termo que aparece numa quarta fonte qualquer daria o caso por
+        # respondido pelo documento errado. Nenhuma fixture distinguia os dois
+        # ramos — descoberto quando uma mutacao apagou este filtro e passou.
+        envelope = {
+            "cobertura": "confirmada",
+            "fontes": [
+                {"source_uri": "docs/a.md#s1", "trecho": "o adquirente obrigatorio",
+                 "status": "rascunho"},
+                {"source_uri": "docs/z.md#s1", "trecho": "a retencao noutro lugar",
+                 "status": "rascunho"},
+            ],
+        }
+        caso = dict(
+            self.BASE,
+            fontes_esperadas=["docs/a.md"],
+            termos_esperados=["adquirente", "retencao"],
+        )
+        with mock.patch.object(avaliacao.contexto, "construir", return_value=envelope):
+            r = avaliacao._executar_caso(caso)
+
+        self.assertEqual(["adquirente"], r["termos_encontrados"])
+        self.assertFalse(r["ok"])
+
+    def test_uma_fonte_sem_status_reprova_mesmo_com_as_outras_certas(self) -> None:
+        # Onde `fontes_sem_status` de fato DECIDE. Com uma fonte so, tirar o branco
+        # esvazia `status_das_fontes` e a guarda de conjunto vazio ja reprova o
+        # caso: a fixture nao conseguia distinguir quem fez o trabalho, e a mutacao
+        # que neutralizava `fontes_sem_status` passava. Com duas fontes esperadas,
+        # uma valida e uma violando o contrato, `all(...)` passa e so este termo
+        # segura — que e o ponto de separar violacao de observacao.
+        envelope = {
+            "cobertura": "confirmada",
+            "fontes": [
+                {"source_uri": "docs/a.md#s1", "trecho": "o adquirente obrigatorio",
+                 "status": "rascunho"},
+                {"source_uri": "docs/b.md#s1", "trecho": "o adquirente tambem aqui",
+                 "status": None},
+            ],
+        }
+        caso = dict(
+            self.BASE,
+            fontes_esperadas=["docs/a.md", "docs/b.md"],
+            status_esperado=["rascunho"],
+        )
+        with mock.patch.object(avaliacao.contexto, "construir", return_value=envelope):
+            r = avaliacao._executar_caso(caso)
+
+        self.assertEqual(["rascunho"], r["status_das_fontes"])
+        self.assertEqual(["docs/b.md"], r["fontes_sem_status"])
+        self.assertFalse(r["ok"])
+
+    def test_status_so_de_espacos_e_violacao_e_nao_um_valor(self) -> None:
+        # `.strip()` decide de que lado cai `status: "   "`. Sem ele o branco vira
+        # um VALOR em `status_das_fontes` e o relatorio quebra o `minLength: 1` que
+        # ele mesmo declara. Apagar o `.strip()` passava na suite inteira.
+        envelope = {
+            "cobertura": "confirmada",
+            "fontes": [
+                {"source_uri": "docs/a.md#s1", "trecho": "o adquirente obrigatorio",
+                 "status": "rascunho"},
+                {"source_uri": "docs/b.md#s1", "trecho": "o adquirente tambem aqui",
+                 "status": "   "},
+            ],
+        }
+        caso = dict(
+            self.BASE,
+            fontes_esperadas=["docs/a.md", "docs/b.md"],
+            status_esperado=["rascunho"],
+        )
+        with mock.patch.object(avaliacao.contexto, "construir", return_value=envelope):
+            r = avaliacao._executar_caso(caso)
+
+        self.assertEqual(["rascunho"], r["status_das_fontes"])
+        self.assertEqual(["docs/b.md"], r["fontes_sem_status"])
+        self.assertFalse(r["ok"])
+
+    def test_violacao_reprova_mesmo_sem_o_caso_afirmar_proveniencia(self) -> None:
+        # Fonte sem `status` viola o contrato que `contexto-v2` publica. Medir a
+        # violacao, grava-la no relatorio e so agir se o caso por acaso afirmar
+        # proveniencia era o pior dos estados: um indice corrompido ficava verde.
+        envelope = {
+            "cobertura": "confirmada",
+            "fontes": [
+                {"source_uri": "docs/a.md#s1", "trecho": "o adquirente obrigatorio",
+                 "status": None},
+            ],
+        }
+        with mock.patch.object(avaliacao.contexto, "construir", return_value=envelope):
+            r = avaliacao._executar_caso(dict(self.BASE))
+
+        self.assertEqual([], r["status_esperado"])
+        self.assertEqual(["docs/a.md"], r["fontes_sem_status"])
+        self.assertFalse(r["ok"])
+
+    def test_os_dois_produtores_de_doc_status_usam_a_mesma_constante(self) -> None:
+        # O que sobra do teste textual, agora sem fingir que cobre o caminho:
+        # `fragmentos` e `hindsight` gravam a MESMA chave e `avaliacao` compara os
+        # dois. Como literais soltos, um derivou — `hindsight` gravava "" — e todo
+        # documento sem status viraria violacao de contrato no dia em que aquele
+        # caminho servisse o envelope. Aqui a afirmacao e sobre o MODULO, nao sobre
+        # o texto: se alguem reescrever a expressao, isto continua valendo.
+        self.assertEqual(lib.STATUS_INDETERMINADO, avaliacao.STATUS_SEM_FRONTMATTER)
+        for modulo in (fragmentos, hindsight):
+            self.assertEqual(lib.STATUS_INDETERMINADO, modulo.STATUS_INDETERMINADO)
+            self.assertEqual(lib.TIPO_INDETERMINADO, modulo.TIPO_INDETERMINADO)
+
+    def test_violacao_em_fonte_nao_esperada_tambem_reprova(self) -> None:
+        # A checagem comecou filtrada por `esperadas`, herdando o filtro do campo
+        # vizinho. Mas ela nao afirma sobre o caso: confere o contrato que
+        # `contexto-v2` publica. Filtrada, um indice corrompido ficava invisivel a
+        # menos que algum caso do corpus por acaso apontasse para o documento
+        # defeituoso — a garantia dependia da composicao do corpus. Aqui a fonte
+        # defeituosa NAO e esperada, e tudo o mais no caso esta certo.
+        envelope = {
+            "cobertura": "confirmada",
+            "fontes": [
+                {"source_uri": "docs/a.md#s1", "trecho": "o adquirente obrigatorio",
+                 "status": "rascunho"},
+                {"source_uri": "docs/z.md#s1", "trecho": "outra coisa qualquer",
+                 "status": None},
+            ],
+        }
+        caso = dict(self.BASE, fontes_esperadas=["docs/a.md"])
+        with mock.patch.object(avaliacao.contexto, "construir", return_value=envelope):
+            r = avaliacao._executar_caso(caso)
+
+        self.assertEqual(["docs/a.md"], r["fontes_citadas"])
+        self.assertEqual(["rascunho"], r["status_das_fontes"])
+        self.assertEqual(["docs/z.md"], r["fontes_sem_status"])
+        self.assertFalse(r["ok"])
+
+    def test_documento_com_dois_fragmentos_ruins_aparece_uma_vez(self) -> None:
+        # `_fonte_base` corta a ancora, entao dois fragmentos ruins do MESMO
+        # documento colapsam num item so — mas isso e o `sorted({...})` fazendo o
+        # trabalho, e nada segurava ele: trocar por `list([...])` passava na suite
+        # inteira. O contrato de saida tipa o campo como `$defs/textos`, que exige
+        # `uniqueItems`, entao a duplicata gravaria um relatorio que viola o proprio
+        # contrato — o mesmo defeito que ja apareceu em `status_esperado`.
+        # A lista e conferida inteira, e nao por pertinencia: fixa ordem e unicidade.
+        envelope = {
+            "cobertura": "confirmada",
+            "fontes": [
+                {"source_uri": "docs/a.md#s1", "trecho": "o adquirente obrigatorio",
+                 "status": "rascunho"},
+                {"source_uri": "docs/z.md#s1", "trecho": "primeiro trecho ruim",
+                 "status": None},
+                {"source_uri": "docs/z.md#s2", "trecho": "segundo trecho ruim",
+                 "status": None},
+            ],
+        }
+        caso = dict(self.BASE, fontes_esperadas=["docs/a.md"])
+        with mock.patch.object(avaliacao.contexto, "construir", return_value=envelope):
+            r = avaliacao._executar_caso(caso)
+
+        self.assertEqual(["docs/z.md"], r["fontes_sem_status"])
+        self.assertFalse(r["ok"])
+
+    def test_documentos_ruins_saem_em_ordem_estavel(self) -> None:
+        # A ordem entra na `assinatura` do relatorio, e a ordem de iteracao de um
+        # `set` de strings varia ENTRE PROCESSOS (hash randomizado). Sem o `sorted`
+        # a mesma entrada produziria assinaturas diferentes em execucoes iguais.
+        # As fontes chegam fora de ordem alfabetica de proposito.
+        envelope = {
+            "cobertura": "confirmada",
+            "fontes": [
+                {"source_uri": "docs/a.md#s1", "trecho": "o adquirente obrigatorio",
+                 "status": "rascunho"},
+                {"source_uri": "docs/z.md#s1", "trecho": "ruim", "status": None},
+                {"source_uri": "docs/m.md#s1", "trecho": "ruim", "status": None},
+                {"source_uri": "docs/b.md#s1", "trecho": "ruim", "status": None},
+                {"source_uri": "docs/t.md#s1", "trecho": "ruim", "status": None},
+                {"source_uri": "docs/e.md#s1", "trecho": "ruim", "status": None},
+            ],
+        }
+        caso = dict(self.BASE, fontes_esperadas=["docs/a.md"])
+        with mock.patch.object(avaliacao.contexto, "construir", return_value=envelope):
+            r = avaliacao._executar_caso(caso)
+
+        # Cinco documentos, e nao dois: sem `sorted` a ordem vem da iteracao de um
+        # `set`, que PODE calhar de sair ordenada. Com 5 isso e 1 em 120 — medido,
+        # nao suposto. Ordenacao nao da para detectar de forma determinista.
+        self.assertEqual(
+            ["docs/b.md", "docs/e.md", "docs/m.md", "docs/t.md", "docs/z.md"],
+            r["fontes_sem_status"],
+        )
+
+    def test_violacao_reprova_tambem_no_caso_negativo(self) -> None:
+        # Sem isto os dois lados do portao se contradizem: um caso pode passar
+        # (`ok: True`) e ainda assim aparecer na linha de violacao — portao vermelho
+        # nomeando um caso aprovado. A combinacao exige um envelope duplamente
+        # malformado (item sem `source_uri` E sem `status`), mas e alcancavel, e o
+        # ramo negativo era o unico lugar onde a regra ainda nao valia.
+        envelope = {
+            "cobertura": "ausente",
+            "fontes": [{"source_uri": "", "trecho": "orfao", "status": None}],
+        }
+        caso = {
+            "id": "n", "categoria": "atendimento", "perfil": "atendimento",
+            "pergunta": "p", "resposta_esperada": "r",
+            "fontes_esperadas": [], "fontes_proibidas": [],
+            "termos_esperados": [], "espera_sem_fonte": True,
+        }
+        with mock.patch.object(avaliacao.contexto, "construir", return_value=envelope):
+            r = avaliacao._executar_caso(caso)
+
+        # Sem `source_uri` a fonte nao entra em `fontes_retornadas`, entao o caso
+        # negativo parecia perfeito. A violacao e a unica coisa que o reprova.
+        self.assertEqual([], r["fontes_retornadas"])
+        self.assertEqual(["(fonte sem caminho em `source_uri`)"], r["fontes_sem_status"])
+        self.assertFalse(r["ok"])
+
+    def test_violacao_e_lista_de_documentos_no_codigo_e_no_contrato(self) -> None:
+        # O campo nasceu booleano e virou lista para o portao poder nomear o
+        # documento. Codigo e contrato tem de mudar juntos: com o schema ainda
+        # tipando booleano, `memoria avaliar` gravaria um relatorio que viola o
+        # proprio contrato — foi exatamente assim que o `status_esperado` escapou.
+        caminho = (
+            REPOSITORIO
+            / "memoria_evolutiva/schemas/relatorio-avaliacao-rag-v1.schema.json"
+        )
+        esquema = json.loads(caminho.read_text(encoding="utf-8"))
+        declarado = esquema["$defs"]["caso_resultado"]["properties"]["fontes_sem_status"]
+        # Mesmo `$defs` das demais listas de texto: unico, nao vazio por item.
+        self.assertEqual({"$ref": "#/$defs/textos"}, declarado)
+        self.assertEqual("array", esquema["$defs"]["textos"]["type"])
+
+        produzido = self._executar()["fontes_sem_status"]
+        self.assertIsInstance(produzido, list)
+        self.assertEqual([], produzido)
+
+    def test_gate_separa_defeito_de_indice_de_regressao_de_recuperacao(self) -> None:
+        # O operador via `casos reprovados: eng-x` e mais nada. Corrigir o indice e
+        # reajustar o ranqueamento sao acoes opostas, e a mensagem nao apontava para
+        # nenhuma. O caso vai com `ok: True` DE PROPOSITO: com `ok: False` a linha
+        # "casos reprovados" tambem dispararia e o teste nao saberia qual das duas
+        # fez o trabalho.
+        relatorio = {
+            "metricas": {"global": dict.fromkeys(avaliacao.METRICAS_MAIORES, 1.0)},
+            "casos": [
+                {"id": "eng-x", "ok": True, "fontes_sem_status": ["docs/ruim.md"]},
+                {"id": "eng-z", "ok": True, "fontes_sem_status": ["docs/ruim.md"]},
+                {"id": "eng-y", "ok": True, "fontes_sem_status": []},
+            ],
+        }
+        relatorio["metricas"]["global"]["sem_fonte"] = 0.0
+        limites = dict.fromkeys(avaliacao.METRICAS_MAIORES, 0.0)
+        limites["sem_fonte"] = 1.0
+        with (
+            mock.patch.object(avaliacao, "_limites_absolutos", return_value=limites),
+            mock.patch.object(avaliacao, "_cfg", return_value={}),
+        ):
+            resultado = avaliacao._aplicar_gate(relatorio, None)
+
+        erros = resultado["gate"]["erros"]
+        texto = " | ".join(erros)
+        self.assertFalse(resultado["gate"]["aprovado"])
+        # O que o operador precisa consertar e o DOCUMENTO. Dois casos compartilham
+        # a mesma fonte ruim de proposito: com ids de caso ele teria de cruzar
+        # `fontes_retornadas` na mao, e com casos compartilhando fontes isso fica
+        # ambiguo. O documento aparece uma vez so.
+        self.assertIn("docs/ruim.md", texto)
+        self.assertIn("índice desatualizado", texto)
+        self.assertEqual(1, texto.count("docs/ruim.md"), "documento repetido")
+        self.assertNotIn("eng-x", texto)
+        self.assertNotIn("eng-y", texto)
+        # Isolamento: se "casos reprovados" tivesse disparado junto, o teste nao
+        # saberia qual das duas mensagens fez o trabalho.
+        self.assertNotIn("casos reprovados", texto)
+
+    def test_status_esperado_e_um_cardapio_e_nao_uma_igualdade(self) -> None:
+        # A razao de o campo ser LISTA e aceitar qualquer um dos valores, nao exigir
+        # que todos aparecam. Toda fixture ate aqui usava um unico valor igual ao
+        # observado, e nessas `all(... in ...)` e `==` sao indistinguiveis: uma
+        # mutacao trocando um pelo outro passava na suite inteira.
+        envelope = {
+            "cobertura": "confirmada",
+            "fontes": [
+                {"source_uri": "docs/a.md#s1", "trecho": "o adquirente obrigatorio",
+                 "status": "rascunho"},
+            ],
+        }
+        with mock.patch.object(avaliacao.contexto, "construir", return_value=envelope):
+            r = avaliacao._executar_caso(
+                dict(self.BASE, status_esperado=["rascunho", "verificado"])
+            )
+        self.assertEqual(["rascunho"], r["status_das_fontes"])
+        self.assertTrue(r["ok"])
+
+    def test_cobertura_esperada_tambem_vale_no_caso_negativo(self) -> None:
+        # `cobertura_ok` entra no `ok` do ramo negativo tambem, e nao havia teste
+        # nenhum disso: apagar o termo passava na suite inteira. Perfil que le
+        # codigo, que e onde a assercao tem conteudo (ver a recusa na carga).
+        base = {
+            "id": "n", "categoria": "engenharia", "perfil": "engenharia-leitura",
+            "pergunta": "p", "resposta_esperada": "r",
+            "fontes_esperadas": [], "fontes_proibidas": [],
+            "termos_esperados": [], "espera_sem_fonte": True,
+        }
+        envelope = {"cobertura": "parcial", "fontes": []}
+        with mock.patch.object(avaliacao.contexto, "construir", return_value=envelope):
+            certo = avaliacao._executar_caso(dict(base, cobertura_esperada="parcial"))
+            errado = avaliacao._executar_caso(dict(base, cobertura_esperada="ausente"))
+        self.assertTrue(certo["ok"])
+        self.assertFalse(errado["ok"])
+
+    # Sementes fixas: escolhidas medindo, e nao chutadas. Com semente aleatoria a
+    # deteccao de ordem vira amostragem; fixando o par ela passa a ser determinista.
+    SEMENTES_DE_HASH = ("1", "2")
+
+    def _serializado_com_semente(self, semente: str) -> str:
+        programa = (
+            "import sys\n"
+            "from unittest import mock\n"
+            "from memoria_evolutiva import avaliacao\n"
+            "envelope = {'cobertura': 'confirmada', 'fontes': [\n"
+            "    {'source_uri': 'docs/a.md#s1', 'trecho': 'o adquirente obrigatorio',\n"
+            "     'status': 'rascunho'},\n"
+            "    {'source_uri': 'docs/z.md#s1', 'trecho': 'ruim', 'status': None},\n"
+            "    {'source_uri': 'docs/m.md#s1', 'trecho': 'ruim', 'status': None},\n"
+            "    {'source_uri': 'docs/b.md#s1', 'trecho': 'ruim', 'status': None},\n"
+            "    {'source_uri': 'docs/t.md#s1', 'trecho': 'ruim', 'status': None},\n"
+            "    {'source_uri': 'docs/e.md#s1', 'trecho': 'ruim', 'status': None},\n"
+            "]}\n"
+            "caso = {'id': 'x', 'categoria': 'engenharia',\n"
+            "        'perfil': 'engenharia-leitura', 'pergunta': 'p',\n"
+            "        'resposta_esperada': 'r', 'fontes_esperadas': ['docs/a.md'],\n"
+            "        'fontes_proibidas': [], 'termos_esperados': ['adquirente'],\n"
+            "        'espera_sem_fonte': False}\n"
+            "with mock.patch.object(avaliacao.contexto, 'construir',\n"
+            "                       return_value=envelope):\n"
+            "    r = avaliacao._executar_caso(caso)\n"
+            "sys.stdout.write(avaliacao._serializar(r))\n"
+        )
+        env = os.environ.copy()
+        env["PYTHONPATH"] = str(REPOSITORIO) + os.pathsep + env.get("PYTHONPATH", "")
+        env["PYTHONUTF8"] = "1"
+        env["PYTHONHASHSEED"] = semente
+        r = subprocess.run(
+            [sys.executable, "-c", programa], cwd=REPOSITORIO, env=env,
+            capture_output=True, text=True, encoding="utf-8", timeout=120,
+        )
+        self.assertEqual(0, r.returncode, r.stdout + r.stderr)
+        return r.stdout
+
+    def test_relatorio_serializa_identico_entre_processos(self) -> None:
+        """Ordem de lista entra nos BYTES que `verificar()` compara.
+
+        `verificar` (`avaliacao.py`) confronta o relatorio gravado com um recomputado
+        byte a byte, e `_serializar` ordena chaves mas PRESERVA a ordem das listas.
+        Um campo derivado de `set` sem `sorted` faria `memoria verificar` acusar
+        "relatório RAG ausente ou defasado" sobre um relatorio correto — de forma
+        intermitente, com cara de CI instavel, nos 12 projetos.
+
+        Este teste nao substitui o de `fontes_sem_status`, que localiza a falha num
+        campo. Ele vale para QUALQUER campo derivado de `set` que alguem venha a
+        acrescentar e esqueca de ordenar — inclusive os que ninguem lembrou de
+        testar, que foi como quase todos os defeitos desta mudanca apareceram.
+        """
+        primeiro, segundo = (
+            self._serializado_com_semente(s) for s in self.SEMENTES_DE_HASH
+        )
+        self.assertEqual(primeiro, segundo)
+
+    def test_estados_de_cobertura_tem_fonte_unica(self) -> None:
+        # Comparar com um literal so provava que o literal do teste e o do codigo.
+        # Os dois schemas publicam o mesmo conjunto para consumidores diferentes —
+        # o envelope que sai e o corpus que entra —, e e a divergencia ENTRE eles
+        # que quebra um projeto instalado.
+        def enum(arquivo, *caminho):
+            no = json.loads(
+                (REPOSITORIO / "memoria_evolutiva/schemas" / arquivo).read_text(
+                    encoding="utf-8"
+                )
+            )
+            for chave in caminho:
+                no = no[chave]
+            return no["enum"]
+
+        envelope = enum("contexto-v2.schema.json", "properties", "cobertura")
+        corpus = enum(
+            "corpus-avaliacao-rag-v1.schema.json",
+            "$defs", "caso", "properties", "cobertura_esperada",
+        )
+        # Conjunto, e nao lista: em JSON Schema a ordem de um `enum` nao carrega
+        # significado, e um teste que quebra por reordenacao cosmetica ensina a
+        # equipe a ignora-lo justamente quando ele estiver certo.
+        self.assertEqual(set(contexto.COBERTURAS), set(envelope))
+        self.assertEqual(set(contexto.COBERTURAS), set(corpus))
+        self.assertEqual(len(contexto.COBERTURAS), len(envelope), "enum com repetido")
+        self.assertEqual(len(contexto.COBERTURAS), len(corpus), "enum com repetido")
+
+    def test_contrato_do_corpus_proibe_as_assercoes_inertes_do_negativo(self) -> None:
+        # A recusa em `_carregar_corpus` so acontece quando alguem roda
+        # `memoria avaliar`. O schema e o que valida no editor e na CI dos 12
+        # projetos, e ele ja expressa a regra irma (`fontes_esperadas` e
+        # `termos_esperados` zerados) — omitir estas dizia, no contrato publicado,
+        # que o caso e valido. Sao DUAS regras com condicoes diferentes: uma vale
+        # para todo negativo, a outra so onde o perfil nao le codigo.
+        caminho = (
+            REPOSITORIO / "memoria_evolutiva/schemas/corpus-avaliacao-rag-v1.schema.json"
+        )
+        esquema = json.loads(caminho.read_text(encoding="utf-8"))
+        sem_codigo = sorted(
+            nome for nome, perfil in contexto.PERFIS.items() if not perfil["codigo"]
+        )
+
+        def ramo(tem_perfil: bool) -> dict:
+            achados = [
+                r for r in esquema["$defs"]["caso"]["allOf"]
+                if r.get("if", {}).get("properties", {}).get(
+                    "espera_sem_fonte", {}).get("const") is True
+                and ("perfil" in r["if"]["properties"]) is tem_perfil
+            ]
+            self.assertEqual(1, len(achados))
+            return achados[0]
+
+        # Todo negativo: `status_esperado` nunca e conferido.
+        self.assertIs(
+            False, ramo(False)["then"]["properties"]["status_esperado"]
+        )
+        # Negativo em perfil sem codigo: `cobertura_esperada` seria tautologia
+        # (`ausente`) ou vermelho permanente. A lista de perfis vem de `PERFIS`,
+        # para o schema nao ficar mentindo se a tabela mudar.
+        restrito = ramo(True)
+        self.assertEqual(sem_codigo, sorted(restrito["if"]["properties"]["perfil"]["enum"]))
+        self.assertIs(
+            False, restrito["then"]["properties"]["cobertura_esperada"]
+        )
+
+    def test_contrato_do_relatorio_declara_os_campos(self) -> None:
+        # O relatorio tambem e `additionalProperties: false`. Eu conferi o schema de
+        # ENTRADA e esqueci o de SAIDA: o corpus validava e o relatorio produzido a
+        # partir dele era recusado. Nenhum e obrigatorio — relatorio antigo, gravado
+        # antes destes campos, continua valido.
+        caminho = (
+            REPOSITORIO
+            / "memoria_evolutiva/schemas/relatorio-avaliacao-rag-v1.schema.json"
+        )
+        esquema = json.loads(caminho.read_text(encoding="utf-8"))
+        resultado = esquema["$defs"]["caso_resultado"]
+        self.assertFalse(resultado["additionalProperties"])
+        for chave in ("status_esperado", "status_das_fontes",
+                      "cobertura_esperada", "cobertura_envelope",
+                      "fontes_sem_status"):
+            self.assertIn(chave, resultado["properties"])
+            self.assertNotIn(chave, resultado["required"])
+
+    def test_relatorio_produzido_cabe_no_contrato_publicado(self) -> None:
+        # O teste acima le o schema; este confere o que o codigo REALMENTE emite.
+        # Um campo novo no dicionario de resultado sem entrada no schema so
+        # aparecia quando um projeto rodasse a avaliacao.
+        caminho = (
+            REPOSITORIO
+            / "memoria_evolutiva/schemas/relatorio-avaliacao-rag-v1.schema.json"
+        )
+        esquema = json.loads(caminho.read_text(encoding="utf-8"))
+        declaradas = set(esquema["$defs"]["caso_resultado"]["properties"])
+        produzidas = set(self._executar(status_esperado=["rascunho"]))
+        self.assertEqual(set(), produzidas - declaradas)
+
+    def test_contrato_publicado_declara_os_campos(self) -> None:
+        # `additionalProperties: false` no caso: campo que o codigo aceita e o
+        # schema nao declara e corpus que valida em um lugar e falha no outro.
+        caminho = (
+            REPOSITORIO / "memoria_evolutiva/schemas/corpus-avaliacao-rag-v1.schema.json"
+        )
+        esquema = json.loads(caminho.read_text(encoding="utf-8"))
+        caso = esquema["$defs"]["caso"]
+        self.assertFalse(caso["additionalProperties"])
+        self.assertIn("status_esperado", caso["properties"])
+        self.assertIn("cobertura_esperada", caso["properties"])
+        self.assertNotIn("status_esperado", caso["required"])
+        self.assertNotIn("cobertura_esperada", caso["required"])
 
 
 class CoberturaReflitaAPerguntaTest(unittest.TestCase):

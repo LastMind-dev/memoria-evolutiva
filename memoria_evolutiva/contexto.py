@@ -178,6 +178,11 @@ def _pontuacao(pergunta: str, texto: str) -> float:
     return _pontuacao_preparada(_preparar_pergunta(pergunta), texto)
 
 
+# Estados possiveis do campo `cobertura` do envelope. Vive aqui, ao lado de quem
+# os produz, para `avaliacao` validar contra a mesma lista em vez de repeti-la.
+COBERTURAS = ("confirmada", "parcial", "ausente")
+
+
 def _cobertura(pergunta: str, itens: list[dict]) -> tuple[str, int, int]:
     """Quanto da pergunta o material entregue de fato cobre.
 
