@@ -55,3 +55,10 @@ Relatório e manifesto possuem SHA-256 e são comparados byte a byte com uma rec
 atual. Hindsight e Graphify continuam derivados e com autoridade zero. A avaliação mede
 o contexto recuperado; ela não mede redação livre de uma LLM e não converte uma resposta
 sem fonte em verdade.
+
+A avaliação roda **somente com a recuperação local** — busca literal nos fragmentos e no
+código —, sem consultar Hindsight nem Graphify, mesmo quando estão ativos. O motivo é a
+comparação byte a byte: se a reconstrução usasse os provedores, o relatório dependeria da
+máquina que o gerou. A do desenvolvedor alcança o Hindsight, o runner de CI não, e o
+mesmo commit ficaria verde num e vermelho no outro. O gateway que os agentes consultam
+(`memoria contexto`, MCP, HTTP) continua usando os provedores normalmente.

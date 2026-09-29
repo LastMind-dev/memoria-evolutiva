@@ -296,10 +296,14 @@ def _proibida(fonte: str, proibidas: list[str]) -> bool:
 
 
 def _executar_caso(caso: dict) -> dict:
-    envelope = contexto.construir(
-        caso["pergunta"], caso["perfil"],
-        produto=caso.get("produto"), tenant=caso.get("tenant"),
-    )
+    # Somente recuperação local: o relatório é versionado e comparado byte a byte com
+    # uma reconstrução, então não pode depender de Hindsight ou Graphify estarem
+    # alcançáveis na máquina que o gera — o runner de CI não os alcança.
+    with contexto.somente_recuperacao_local():
+        envelope = contexto.construir(
+            caso["pergunta"], caso["perfil"],
+            produto=caso.get("produto"), tenant=caso.get("tenant"),
+        )
     itens_fontes = list(envelope["fontes"])
     fontes = [_fonte_base(item.get("source_uri")) for item in itens_fontes]
     fontes = list(dict.fromkeys(fonte for fonte in fontes if fonte))

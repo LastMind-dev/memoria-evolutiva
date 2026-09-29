@@ -4496,6 +4496,70 @@ class OrigemResultadoHindsight(unittest.TestCase):
         self.assertEqual(contexto._origens_resultado(resultado), ["docs/A.md"])
 
 
+class AvaliacaoIndependeDeProvedores(unittest.TestCase):
+    """O relatório de avaliação é versionado e comparado byte a byte com uma
+    reconstrução. Se a reconstrução consulta Hindsight ou Graphify, o relatório passa a
+    depender de QUAL máquina o gerou: a do desenvolvedor alcança os provedores, o runner
+    de CI não, e o mesmo commit fica verde num e vermelho no outro. Aconteceu num projeto
+    real — um sinal semântico acrescentava uma fonte a `fontes_retornadas` localmente, e
+    o CI (sem Hindsight) reprovava o relatório como defasado em todo commit.
+    """
+
+    CASO = {
+        "id": "caso", "categoria": "engenharia", "perfil": "engenharia-leitura",
+        "pergunta": "pergunta", "fontes_esperadas": [], "termos_esperados": [],
+    }
+
+    def test_caso_avaliado_nao_consulta_hindsight_nem_graphify(self) -> None:
+        with (
+            mock.patch.object(
+                contexto, "config", return_value={
+                    "memoria": {"ativo": True}, "grafo": {"ativo": True},
+                },
+            ),
+            mock.patch.object(contexto.hindsight, "consultar") as consultar,
+            mock.patch.object(contexto.indice, "verificar") as indice_verificar,
+            mock.patch.object(contexto, "_verificar_grafo_compartilhado") as grafo_verificar,
+            mock.patch.object(contexto, "_carregar_manifesto", return_value={
+                "projeto": "fixture", "fragmentos": [],
+            }),
+            mock.patch.object(contexto.fragmentos, "consultaveis", return_value=[]),
+            mock.patch.object(contexto.grafo, "_arquivos", return_value={}),
+            mock.patch.object(contexto, "_head_atual", return_value=None),
+        ):
+            avaliacao._executar_caso(dict(self.CASO))
+
+        consultar.assert_not_called()
+        indice_verificar.assert_not_called()
+        grafo_verificar.assert_not_called()
+
+    def test_gateway_fora_da_avaliacao_continua_usando_provedores(self) -> None:
+        # O desligamento vale só dentro da avaliação: o gateway que os agentes
+        # consultam não pode perder o sinal semântico por efeito colateral.
+        with (
+            mock.patch.object(
+                contexto, "config", return_value={"memoria": {"ativo": True}},
+            ),
+            mock.patch.object(contexto.indice, "verificar", return_value=0),
+            mock.patch.object(
+                contexto.hindsight, "consultar", return_value={"results": []},
+            ) as consultar,
+        ):
+            with contexto.somente_recuperacao_local():
+                pass
+            contexto._sinais_semanticos("pergunta", 2048)
+
+        consultar.assert_called_once()
+
+    def test_modo_local_e_restaurado_mesmo_quando_o_caso_falha(self) -> None:
+        with mock.patch.object(
+            avaliacao.contexto, "construir", side_effect=contexto.ContextoErro("x"),
+        ):
+            with self.assertRaises(contexto.ContextoErro):
+                avaliacao._executar_caso(dict(self.CASO))
+        self.assertFalse(contexto._somente_local())
+
+
 class SinaisSemanticosHindsight(unittest.TestCase):
     """Pina o laço de `_sinais_semanticos`, não só o helper de origem."""
 

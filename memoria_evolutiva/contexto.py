@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
 import math
@@ -10,6 +11,7 @@ import subprocess
 import sys
 import unicodedata
 from concurrent.futures import Future
+from contextvars import ContextVar
 from functools import lru_cache
 from pathlib import Path
 from threading import Lock
@@ -20,6 +22,14 @@ from .lib import barras, config, raiz, sha256_canonico
 
 SCHEMA = 2
 MCP_PROTOCOL = "2026-07-28"
+# Recuperação somente local, ligada no escopo de um `with`: desliga Hindsight e
+# Graphify e deixa apenas a busca literal nos fragmentos e no código. Existe para a
+# avaliação RAG, cujo relatório é versionado e comparado byte a byte com uma
+# reconstrução — se a reconstrução consultasse provedores, o relatório dependeria da
+# máquina que o gerou (a do desenvolvedor alcança o Hindsight; o runner de CI, não).
+# ContextVar, e não global: o gateway HTTP atende em threads (`ThreadingHTTPServer`), e
+# um `with` numa requisição não pode desligar o sinal semântico de outra.
+_SOMENTE_LOCAL: ContextVar[bool] = ContextVar("memoria_somente_local", default=False)
 STOPWORDS_BUSCA = {
     "a", "as", "ao", "aos", "como", "da", "das", "de", "do", "dos", "e",
     "em", "esta", "estao", "foi", "na", "nas", "no", "nos", "o", "os", "onde",
@@ -314,9 +324,25 @@ def _origens_resultado(resultado: dict) -> list[str]:
     return []
 
 
+@contextlib.contextmanager
+def somente_recuperacao_local():
+    """Desliga Hindsight e Graphify até o fim do `with`; ver `_SOMENTE_LOCAL`."""
+    token = _SOMENTE_LOCAL.set(True)
+    try:
+        yield
+    finally:
+        _SOMENTE_LOCAL.reset(token)
+
+
+def _somente_local() -> bool:
+    return _SOMENTE_LOCAL.get()
+
+
 def _sinais_semanticos(
     pergunta: str, max_tokens: int,
 ) -> tuple[dict[str, list[tuple[float, str]]], list[str], bool]:
+    if _somente_local():
+        return {}, ["Recuperação somente local; Hindsight não consultado."], True
     cfg_memoria = config().get("memoria", {})
     if not cfg_memoria.get("ativo"):
         return {}, ["Hindsight desativado explicitamente; busca semântica não executada."], True
@@ -471,10 +497,15 @@ def _candidatos_codigo(pergunta: str, permitir: bool) -> tuple[list[dict], list[
     if not permitir:
         return [], [], True
     cfg_grafo = config().get("grafo", {})
-    ativo = bool(cfg_grafo.get("ativo"))
+    local = _somente_local()
+    ativo = bool(cfg_grafo.get("ativo")) and not local
     grafo_fresco = ativo and _verificar_grafo_compartilhado() == 0
     avisos: list[str] = []
-    if ativo and not grafo_fresco:
+    if local:
+        avisos.append(
+            "Recuperação somente local; Graphify não consultado, apenas busca literal no código."
+        )
+    elif ativo and not grafo_fresco:
         avisos.append("Graphify defasado; sinais estruturais foram ignorados.")
     elif not ativo:
         avisos.append("Graphify desativado explicitamente; apenas busca literal no código foi usada.")
