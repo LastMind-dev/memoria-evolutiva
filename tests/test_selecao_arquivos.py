@@ -70,6 +70,42 @@ class SelecaoArquivosTest(unittest.TestCase):
 
         self.assertEqual(antes, grafo._arquivos())
 
+    def test_alias_da_raiz_preserva_caminhos_para_os_consumidores(self) -> None:
+        from memoria_evolutiva import gerar, grafo, instalar
+
+        alias_tmp = tempfile.TemporaryDirectory(prefix="teste-raiz-alias-")
+        self.addCleanup(alias_tmp.cleanup)
+        alias = Path(alias_tmp.name) / "projeto"
+        try:
+            alias.symlink_to(self.projeto, target_is_directory=True)
+        except OSError as exc:
+            self.skipTest(f"symlink indisponivel: {exc}")
+
+        leitores = {
+            "inventario": diagnosticar.inventario_projeto,
+            "codigo": diagnosticar.inventario_codigo,
+            "grafo": grafo._arquivos,
+            "mapa": lambda: gerar.extrator_mapa_diretorios(lib.config()),
+            "deteccao": lambda: instalar._fontes_de_codigo(lib.raiz()),
+        }
+        for com_git in (False, True):
+            if com_git:
+                self.git("init", "--quiet")
+            self.limpar_caches()
+            esperados = {nome: ler() for nome, ler in leitores.items()}
+            self.assertIn("app/Servico.php", esperados["grafo"])
+            # No POSIX getcwd resolve symlinks; simula a raiz lexical retornada
+            # pelo Windows (ex.: RUNNER~1), mantendo a seleção e leitura reais.
+            with (
+                mock.patch.dict(os.environ, {"MEMORIA_PROJETO_RAIZ": ""}),
+                mock.patch("memoria_evolutiva.lib.os.getcwd", return_value=str(alias)),
+            ):
+                self.limpar_caches()
+                self.assertEqual(alias, Path(lib.raiz()))
+                for nome, ler in leitores.items():
+                    with self.subTest(com_git=com_git, leitor=nome):
+                        self.assertEqual(esperados[nome], ler())
+
     def test_env_e_bloqueado_antes_da_leitura_mesmo_versionado(self) -> None:
         bloqueados = {
             self.escrever(nome, "VALOR_SINTETICO=nao_e_credencial\n")
@@ -241,6 +277,7 @@ class SelecaoArquivosTest(unittest.TestCase):
         self.escrever(".git/index", "indice sintetico invalido\n")
         env = os.environ.copy()
         env["PYTHONPATH"] = str(Path(__file__).resolve().parents[1])
+        env["PYTHONUTF8"] = "1"
         resultado = subprocess.run(
             [sys.executable, "-m", "memoria_evolutiva", "diagnosticar", "--json"],
             cwd=self.projeto, env=env, capture_output=True, text=True,

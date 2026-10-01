@@ -76,21 +76,22 @@ def _candidatos_locais(base: Path, ignorar: set[str]) -> list[Path]:
 
 def arquivos(base: Path, ignorar: set[str]) -> list[Path]:
     """Mantém fontes novas, mas não inclui arquivos ignorados pelo Git."""
-    base = base.resolve()
-    relativos = _candidatos_git(base)
+    base_resolvida = base.resolve()
+    relativos = _candidatos_git(base_resolvida)
     if relativos is None:
-        relativos = _candidatos_locais(base, ignorar)
+        relativos = _candidatos_locais(base_resolvida, ignorar)
     encontrados = []
     for relativo in set(relativos):
         if not permitido(relativo, ignorar):
             continue
         # Um diretório rastreado pode ter sido substituído por link no working tree.
-        if any((base / Path(*relativo.parts[:i])).is_symlink()
+        if any((base_resolvida / Path(*relativo.parts[:i])).is_symlink()
                for i in range(1, len(relativo.parts) + 1)):
             continue
-        arquivo = base / relativo
-        if not arquivo.resolve().is_relative_to(base) or not arquivo.is_file():
+        arquivo = base_resolvida / relativo
+        if not arquivo.resolve().is_relative_to(base_resolvida) or not arquivo.is_file():
             continue
-        encontrados.append(arquivo)
+        # Os consumidores usam relative_to(base), inclusive com aliases da raiz.
+        encontrados.append(base / relativo)
     return sorted(encontrados, key=lambda p: (p.relative_to(base).as_posix().lower(),
                                               p.relative_to(base).as_posix()))
