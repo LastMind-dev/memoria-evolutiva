@@ -41,6 +41,16 @@ Rode a partir da raiz do projeto; na primeira instalação, o padrao.json será 
 
 
 def main() -> int:
+    from .fontes import FontesErro
+
+    try:
+        return _executar()
+    except FontesErro as exc:
+        sys.stderr.write(f"ERRO — {exc}. Nenhuma varredura permissiva foi usada.\n")
+        return 2
+
+
+def _executar() -> int:
     # Saída redirecionada no Windows pode cair em CP1252. Configure antes da primeira
     # mensagem para que caracteres decorativos nunca interrompam uma operação.
     from .lib import preparar_saida

@@ -8,6 +8,7 @@ from collections import Counter
 from functools import lru_cache
 from pathlib import Path
 
+from .fontes import arquivos as arquivos_fontes
 from .lib import barras, config, identidade_arquivo, raiz, sha256_canonico
 
 
@@ -40,16 +41,7 @@ CATEGORIAS = {
 
 @lru_cache(maxsize=1)
 def _arquivos() -> list[Path]:
-    base = Path(raiz())
-    encontrados = []
-    for arquivo in base.rglob("*"):
-        if not arquivo.is_file() or arquivo.is_symlink():
-            continue
-        rel = arquivo.relative_to(base)
-        if any(parte in PULAR for parte in rel.parts):
-            continue
-        encontrados.append(arquivo)
-    return sorted(encontrados, key=lambda p: barras(str(p.relative_to(base))).lower())
+    return arquivos_fontes(Path(raiz()), PULAR)
 
 
 def _git(*args: str) -> str:

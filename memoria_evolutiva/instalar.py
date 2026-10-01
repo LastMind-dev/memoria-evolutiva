@@ -21,6 +21,7 @@ from importlib import metadata
 from pathlib import Path
 
 from . import __version__
+from .fontes import arquivos as arquivos_fontes
 from .lib import barras, markdowns, morre, pacote
 
 ARVORE = [
@@ -77,12 +78,8 @@ def _nome_projeto(raiz_: str, informado: object | None) -> str:
 def _fontes_de_codigo(raiz_: str) -> list[Path]:
     base = Path(raiz_).resolve()
     fontes: list[Path] = []
-    for arquivo in base.rglob("*"):
-        if not arquivo.is_file() or arquivo.is_symlink():
-            continue
+    for arquivo in arquivos_fontes(base, PULAR_DETECCAO):
         relativo = arquivo.relative_to(base)
-        if any(parte in PULAR_DETECCAO for parte in relativo.parts):
-            continue
         if arquivo.suffix.lower() in EXTENSOES_CODIGO:
             fontes.append(relativo)
     return fontes

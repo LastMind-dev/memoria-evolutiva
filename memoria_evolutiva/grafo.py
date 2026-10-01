@@ -11,6 +11,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from .diagnosticar import PULAR
+from .fontes import arquivos as arquivos_fontes
 from .lib import barras, commit_atual, config, raiz, sha256_canonico, titulo
 
 
@@ -98,12 +99,8 @@ def _versao_comando(comando: list[str]) -> str | None:
 def _arquivos() -> dict[str, str]:
     base = Path(raiz())
     saida: dict[str, str] = {}
-    for arquivo in base.rglob("*"):
-        if not arquivo.is_file() or arquivo.is_symlink():
-            continue
+    for arquivo in arquivos_fontes(base, PULAR_GRAFO):
         rel = arquivo.relative_to(base)
-        if any(parte in PULAR_GRAFO for parte in rel.parts):
-            continue
         if arquivo.suffix.lower() not in EXTENSOES:
             continue
         saida[barras(str(rel))] = sha256_canonico(arquivo.read_bytes())
@@ -214,6 +211,10 @@ def _validar_conteudo_grafo(conteudo: object, arquivos: dict[str, str],
 
 
 def sincronizar() -> dict:
+    try:
+        _arquivos()
+    except OSError as exc:
+        raise GrafoErro(f"Seleção de fontes recusada antes de executar Graphify: {exc}") from exc
     comando = _comando()
     versao = _versao_comando(comando)
     grafo_path = _grafo()
@@ -255,8 +256,8 @@ def sincronizar() -> dict:
     if not _grafo().is_file():
         raise GrafoErro(f"Graphify não produziu `{barras(str(_grafo().relative_to(Path(raiz()))))}`")
 
-    arquivos = _arquivos()
     try:
+        arquivos = _arquivos()
         conteudo_grafo = json.loads(grafo_path.read_text(encoding="utf-8"))
         metricas = _validar_conteudo_grafo(
             conteudo_grafo, arquivos, nos_anteriores, fontes_anteriores
@@ -343,7 +344,12 @@ def verificar(silencioso: bool = False, exigir_comando: bool = False) -> int:
         if not silencioso:
             print(f"ERRO — marcador do Graphify inválido: {exc}")
         return 1
-    atual = _arquivos()
+    try:
+        atual = _arquivos()
+    except OSError as exc:
+        if not silencioso:
+            print(f"ERRO — seleção de fontes indisponível: {exc}")
+        return 1
     mudou = [p for p, h in atual.items() if p in anterior and anterior[p] != h]
     novo = [p for p in atual if p not in anterior]
     sumiu = [p for p in anterior if p not in atual]

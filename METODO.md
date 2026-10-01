@@ -523,6 +523,30 @@ Idioma, nível de detalhe, se quer opções antes da execução, o que nunca dev
 
 Em projeto novo, o passo 4 é trivial — tudo é zero, e a régua vale integral desde o commit inicial.
 
+#### Quais arquivos entram na cobertura
+
+O inventário, o mapa de diretórios, a detecção inicial de código e o marcador Graphify
+compartilham a seleção de candidatos, mantendo seus próprios escopos e extensões.
+Em um repositório Git, entram os arquivos versionados e os novos não ignorados,
+relativos à raiz do projeto — inclusive quando ela é um subdiretório de monorepo
+ou worktree. O conteúdo lido é o do diretório de trabalho, não o blob do índice.
+Um arquivo versionado continua elegível mesmo se corresponder a uma regra de ignore.
+
+Antes de abrir conteúdo ou calcular hashes, a seleção exclui links simbólicos
+(inclusive em diretórios intermediários), `.env` e `.env.*`. As exceções explícitas
+são `.env.example`, `.env.sample`, `.env.template` e `.env.dist`, que devem conter
+apenas exemplos. Também exclui `.phpunit.cache` e o runtime Laravel em
+`bootstrap/cache/`, `storage/framework/{cache,sessions,views}/` e `storage/logs/`,
+preservando os placeholders `.gitignore` e `.gitkeep` nos diretórios Laravel. Essas
+proteções prevalecem sobre o versionamento; não substituem uma auditoria geral de
+segredos em outros nomes ou formatos.
+
+Sem repositório Git, a seleção usa o sistema de arquivos com as mesmas proteções
+estáticas; nesse modo não interpreta regras de `.gitignore`. Se houver repositório
+mas o Git falhar, estiver indisponível ou exceder o prazo, a seleção reprova em vez
+de ampliar silenciosamente a varredura. A ordem dos arquivos é determinística e
+os caches existentes do diagnóstico continuam sujeitos à mesma invalidação.
+
 ### Fase 2 — Auditoria (só em projeto existente)
 
 Antes de promover qualquer coisa, **confira o acervo canônico contra o código**. Se ele mente, promover conteúdo para dentro dele só espalha o erro.

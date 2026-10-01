@@ -29,7 +29,7 @@ from datetime import date
 from pathlib import Path
 
 from . import analisar, diagnosticar
-from .lib import (acervo, arquivos_por_extensao, barras, comeca_com, commit_atual,
+from .lib import (acervo, barras, comeca_com, commit_atual,
                   config, frontmatter, markdowns, morre, pacote, raiz, relativo, titulo)
 
 
@@ -67,13 +67,17 @@ def extrator_mapa_diretorios(c: dict) -> tuple[str, str]:
     if not Path(raiz_codigo).is_dir():
         return ("Mapa de diretórios", f"Diretório `{c['gerado']['raiz']}` não existe.\n")
 
+    fontes = [Path(raiz()).resolve() / str(item["arquivo"])
+              for item in diagnosticar.inventario_codigo()]
+
     def conta(dir_: str) -> int:
-        return sum(len(arquivos_por_extensao(dir_, e)) for e in exts)
+        return sum(f.is_relative_to(Path(dir_).resolve()) for f in fontes)
 
     dirs = sorted(
         barras(d)
         for d in _glob.glob(raiz_codigo + "/*")
-        if Path(d).is_dir() and Path(d).name not in diagnosticar.PULAR
+        if Path(d).is_dir() and not Path(d).is_symlink()
+        and Path(d).name not in diagnosticar.PULAR
     )
     linhas: list[str] = []
     total = 0
@@ -81,20 +85,19 @@ def extrator_mapa_diretorios(c: dict) -> tuple[str, str]:
     # ARQUIVOS SOLTOS NA RAIZ CONTAM — a primeira versão só via subpastas e escrevia
     # "Total: 0" num projeto com tudo solto em src/, passando na verificação porque a
     # saída era reprodutível. Reprodutível e falsa.
-    na_raiz = sum(
-        1 for e in exts for f in _glob.glob(raiz_codigo + "/*." + e) if Path(f).is_file()
-    )
+    na_raiz = sum(f.parent == Path(raiz_codigo).resolve() for f in fontes)
     if na_raiz:
         total += na_raiz
         linhas.append(f"| `{c['gerado']['raiz'].strip('/')}/` *(raiz)* | {na_raiz} | — |")
 
     for d in dirs:
-        if not tem_algum_arquivo(d):
-            continue
         n = conta(d)
+        if not n:
+            continue
         total += n
         subs = []
-        for sub in sorted(barras(s) for s in _glob.glob(d + "/*") if Path(s).is_dir()):
+        for sub in sorted(barras(s) for s in _glob.glob(d + "/*")
+                          if Path(s).is_dir() and not Path(s).is_symlink()):
             cn = conta(sub)
             if cn > 0:
                 subs.append(f"`{Path(sub).name}` ({cn})")

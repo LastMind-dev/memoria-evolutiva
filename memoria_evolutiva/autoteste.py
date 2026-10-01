@@ -17,6 +17,8 @@ import sys
 import tempfile
 from pathlib import Path
 
+from .diagnosticar import inventario_codigo
+from .fontes import arquivos as arquivos_fontes, permitido
 from .lib import config, raiz, titulo
 
 PULAR = {".git", "node_modules", "vendor", "__pycache__", ".code-review-graph"}
@@ -33,21 +35,35 @@ def _caminho_relativo_local(base: Path, valor: object, campo: str) -> Path:
     return caminho
 
 
-def _copiar(de: Path, para: Path) -> None:
-    para.mkdir(parents=True, exist_ok=True)
-    for item in de.iterdir():
-        # O autoteste não precisa materializar destinos externos e nunca deve seguir
-        # um link do projeto para fora da cópia temporária.
-        if item.name in PULAR or item.is_symlink():
-            continue
-        destino = para / item.name
+def _copiar(de: Path, para: Path, preservar: tuple[Path, ...] = ()) -> None:
+    de = de.resolve()
+    selecionados = set(arquivos_fontes(de, PULAR))
+
+    def artefato(relativo: Path) -> None:
+        if not permitido(relativo, PULAR) or any(
+            (de / Path(*relativo.parts[:i])).is_symlink()
+            for i in range(1, len(relativo.parts) + 1)
+        ):
+            return
+        item = de / relativo
+        if not item.resolve().is_relative_to(de):
+            return
         if item.is_dir():
-            _copiar(item, destino)
-        else:
-            try:
-                shutil.copy2(item, destino)
-            except OSError:
-                pass
+            # Confiar no acervo não torna código ignorado uma fonte. Só os
+            # documentos e dados locais entram por esta exceção ao Git.
+            for filho in item.iterdir():
+                if filho.is_dir() or filho.suffix.lower() in {".md", ".json"}:
+                    artefato(filho.relative_to(de))
+        elif item.is_file():
+            selecionados.add(item)
+
+    for relativo in preservar:
+        artefato(relativo)
+    para.mkdir(parents=True, exist_ok=True)
+    for item in sorted(selecionados):
+        destino = para / item.relative_to(de)
+        destino.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(item, destino)
 
 
 def _escrever(arquivo: Path, conteudo: str) -> None:
@@ -84,7 +100,7 @@ def main() -> int:
         canonico_dir = _caminho_relativo_local(
             origem, c["acervos"]["canonico"], "acervos.canonico",
         )
-        codigo_dir = _caminho_relativo_local(
+        _caminho_relativo_local(
             origem, c["gerado"].get("raiz", ""), "gerado.raiz",
         )
         politica_autonomia = _caminho_relativo_local(
@@ -117,6 +133,24 @@ def main() -> int:
             _caminho_relativo_local(origem, valor, "ponteiros.arquivos")
             for valor in c.get("ponteiros", {}).get("arquivos", [])
         ]
+        dependencias = [
+            _caminho_relativo_local(
+                origem, c.get(secao, {}).get(campo, padrao), f"{secao}.{campo}",
+            )
+            for secao, campo, padrao in (
+                ("memoria", "marcador", "docs/.hindsight-indexado.json"),
+                ("catraca", "linha_de_base", "docs/politicas/baseline.json"),
+                ("adaptadores", "manifesto", "docs/gerado/manifesto-adaptadores-v1.json"),
+                ("avaliacao", "corpus", "docs/avaliacao/casos-rag-v1.json"),
+                ("avaliacao", "baseline", "docs/politicas/baseline-rag-v1.json"),
+                ("avaliacao", "manifesto", "docs/gerado/manifesto-avaliacao-rag-v1.json"),
+            )
+        ]
+        preservar = (
+            Path("padrao.json"), canonico_dir, ger_dir, politica_autonomia,
+            caminho_grafo, caminho_marcador_grafo, caminho_fragmentos,
+            caminho_avaliacao, *ponteiros, *dependencias,
+        )
     except (OSError, ValueError) as exc:
         print(f"ERRO — autoteste recusado: {exc}.")
         return 1
@@ -136,6 +170,8 @@ def main() -> int:
     tem_avaliacao = isinstance(c.get("avaliacao", {}), dict)
     tem_ciclo_autonomo = isinstance(c.get("ciclo", {}), dict)
     tem_agendamento = isinstance(c.get("agendamento", {}), dict)
+    # Capture a mesma seleção da cobertura antes de retirar o Git da cópia.
+    fontes_cobertura = [Path(str(item["arquivo"])) for item in inventario_codigo()]
 
     def quebra_gerado(t: Path) -> None:
         for g in sorted((t / ger_dir).glob("*.md")):
@@ -169,13 +205,9 @@ def main() -> int:
         )
 
     def quebra_cobertura(t: Path) -> None:
-        codigo = t / codigo_dir
-        extensoes = {
-            "." + str(ext).lower().lstrip(".")
-            for ext in c.get("gerado", {}).get("extensoes", [])
-        }
-        for fonte in sorted(codigo.rglob("*")):
-            if fonte.is_file() and fonte.suffix.lower() in extensoes:
+        for relativo in fontes_cobertura:
+            fonte = t / relativo
+            if fonte.is_file():
                 fonte.write_bytes(fonte.read_bytes() + b"\n")
                 return
 
@@ -343,7 +375,7 @@ def main() -> int:
     # essa preparação, um projeto Git com `vendor/` falha intacto e cria falso positivo.
     with tempfile.TemporaryDirectory(prefix="autoteste-base-") as base_s:
         base = Path(base_s) / "projeto"
-        _copiar(origem, base)
+        _copiar(origem, base, preservar)
         for cmd in ("gerar", "adaptadores gerar"):
             rc_base, saida_base = _rodar(base, cmd)
             if rc_base != 0:
@@ -358,7 +390,7 @@ def main() -> int:
 
             with tempfile.TemporaryDirectory(prefix="autoteste-memoria-") as tmp_s:
                 tmp = Path(tmp_s) / "projeto"
-                _copiar(base, tmp)
+                _copiar(base, tmp, preservar)
                 t["quebra"](tmp)
 
                 comandos = ([t["comando"]] if t["comando"]
